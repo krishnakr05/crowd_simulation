@@ -1,36 +1,5 @@
 import * as THREE from "https://cdn.skypack.dev/three@0.152.2";
 
-/**
- * FlowField — room-aware waypoint navigation.
- *
- * The key fix: agents are assigned to the door that belongs to THEIR room,
- * not simply the nearest door by Euclidean distance. Nearest-distance was
- * causing agents in the top half of a middle room to target the top room's
- * door, which is blocked by the room separator wall.
- *
- * Room layout (from building.js):
- *
- *   y=20 ┌──────────────────────────────┐
- *        │  Top-left   │ │  Top-right   │   y: 7 → 20
- *   y= 7 ├─────────────┘ └─────────────┤
- *        │  Mid-left   │ │  Mid-right   │   y: -7 → 7
- *   y=-7 ├─────────────┘ └─────────────┤
- *        │  Bot-left   │ │  Bot-right   │   y: -20 → -7
- *  y=-20 └──────────────────────────────┘
- *                      ↑ exit at (0,-20)
- *
- * Left rooms:  x < -5    Right rooms: x > 5
- * Corridor:   -5 < x < 5
- */
-
-// Room definitions: each room knows which door(s) it owns.
-// A door index corresponds to the doors[] array in building.js:
-//   0: (-5, 10)  top-left
-//   1: (-5,  0)  mid-left
-//   2: (-5,-14)  bot-left
-//   3: ( 5, 10)  top-right
-//   4: ( 5,  0)  mid-right
-//   5: ( 5,-14)  bot-right
 const ROOMS = [
   { xMin: -30, xMax: -5, yMin:  7, yMax: 20, doorIndices: [0] }, // top-left
   { xMin: -30, xMax: -5, yMin: -7, yMax:  7, doorIndices: [1] }, // mid-left
@@ -48,7 +17,6 @@ export default class FlowField {
     this.doors = doors;
 
     // Waypoints are placed INSIDE the corridor (past the corridor wall)
-    // so goal force pulls agents fully through the gap before switching to exit.
     this.waypoints = doors.map((d) => {
       const insideX = d.x < 0 ? -2 : 2;
       return new THREE.Vector2(insideX, d.y);

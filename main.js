@@ -1,64 +1,175 @@
 import * as THREE from "https://cdn.skypack.dev/three@0.152.2";
-
 import Agent from "./agent.js";
 import { createBuilding } from "./building.js";
 import FlowField from "./FlowField.js";
 
+/* ── SCENE ───────────────────────────────────────────────────────── */
 const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x060e18);
 
-// Camera setup
 const camera = new THREE.OrthographicCamera(-50, 50, 30, -30, 1, 100);
 camera.position.z = 50;
 
-// Renderer setup
-const renderer = new THREE.WebGLRenderer();
+const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(window.devicePixelRatio);
 document.body.appendChild(renderer.domElement);
 
-// Create building and get walls, doors, exit
-const { walls, doors, exit } = createBuilding(scene);
+window.addEventListener("resize", () => {
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
 
-// Create FlowField for navigation through doors → exit
+/* ── BUILDING ────────────────────────────────────────────────────── */
+const { walls, doors, exit, exitMesh, exitGlow } = createBuilding(scene);
 const flowField = new FlowField(exit, doors);
 
-// Agents array
+/* ── EMERGENCY FLASH OVERLAY ─────────────────────────────────────── */
+// A full-screen red plane that flashes when emergency is triggered
+const flashGeo = new THREE.PlaneGeometry(100, 60);
+const flashMat = new THREE.MeshBasicMaterial({
+  color: 0xff2200,
+  transparent: true,
+  opacity: 0,
+});
+const flashMesh = new THREE.Mesh(flashGeo, flashMat);
+flashMesh.position.set(0, 0, 10); // in front of everything
+flashMesh.renderOrder = 99;
+scene.add(flashMesh);
+
+/* ── ALARM PULSE RINGS ───────────────────────────────────────────── */
+// Expanding ring shapes that pulse from the exit when emergency triggers
+const pulseRings = [];
+function createPulseRing() {
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(0.5, 1.2, 32),
+    new THREE.MeshBasicMaterial({
+      color: 0xff4400,
+      transparent: true,
+      opacity: 0.8,
+      side: THREE.DoubleSide,
+    })
+  );
+  ring.position.set(exit.x, exit.y, 0.5);
+  ring._age = 0;
+  scene.add(ring);
+  pulseRings.push(ring);
+}
+
+/* ── HTML OVERLAY (HUD) ──────────────────────────────────────────── */
+const hud = document.createElement("div");
+hud.style.cssText = `
+  position: fixed; top: 0; left: 0; width: 100%; pointer-events: none;
+  font-family: 'Courier New', monospace; color: #00ffcc;
+  padding: 18px 24px; box-sizing: border-box;
+`;
+hud.innerHTML = `
+  <div id="status" style="font-size:13px; letter-spacing:0.12em; opacity:0.7;">
+    STATUS: NORMAL
+  </div>
+  <div id="counter" style="font-size:22px; font-weight:bold; margin-top:4px;">
+    AGENTS: <span id="agentCount">150</span> / 150
+  </div>
+  <div id="evacuated" style="font-size:13px; margin-top:2px; color:#00ff88; opacity:0;">
+    EVACUATED: <span id="evacCount">0</span>
+  </div>
+`;
+document.body.appendChild(hud);
+
+const clickHint = document.createElement("div");
+clickHint.style.cssText = `
+  position: fixed; bottom: 32px; left: 50%; transform: translateX(-50%);
+  font-family: 'Courier New', monospace; color: #00ffcc;
+  font-size: 13px; letter-spacing: 0.15em; opacity: 0.6;
+  pointer-events: none; animation: blink 1.8s ease-in-out infinite;
+`;
+clickHint.textContent = "[ CLICK ANYWHERE TO TRIGGER EMERGENCY ]";
+document.body.appendChild(clickHint);
+
+const style = document.createElement("style");
+style.textContent = `
+  @keyframes blink {
+    0%, 100% { opacity: 0.6; }
+    50%       { opacity: 0.15; }
+  }
+`;
+document.head.appendChild(style);
+
+/* ── AGENTS ──────────────────────────────────────────────────────── */
 const agents = [];
 
-// Random initial positions inside rooms
 function randomPosition() {
   const rooms = [
-    [-25, 10],
-    [10, 10],
-    [-25, 0],
-    [10, 0],
-    [-25, -10],
-    [10, -10],
+    [-25, 10], [10, 10],
+    [-25,  0], [10,  0],
+    [-25,-10], [10,-10],
   ];
   const r = rooms[Math.floor(Math.random() * rooms.length)];
   return new THREE.Vector2(r[0] + Math.random() * 10, r[1] + Math.random() * 6);
 }
 
-// Spawn agents
 for (let i = 0; i < 150; i++) {
-  let agent = new Agent(randomPosition(), doors, exit);
+  const agent = new Agent(randomPosition(), doors, exit);
+  agent.addToScene(scene);
   agents.push(agent);
-  scene.add(agent.mesh);
 }
 
-// Emergency trigger
+/* ── STATE ───────────────────────────────────────────────────────── */
 let emergency = false;
+let flashOpacity = 0;
+let pulseTimer = 0;
+let time = 0;
+
 window.addEventListener("click", () => {
+  if (emergency) return;
   emergency = true;
+  flashOpacity = 0.45; // initial red flash
+  clickHint.style.display = "none";
+  document.getElementById("status").textContent = "⚠ STATUS: EMERGENCY";
+  document.getElementById("status").style.color = "#ff4400";
+  document.getElementById("evacuated").style.opacity = "1";
 });
 
-// Animation loop
+/* ── ANIMATE ─────────────────────────────────────────────────────── */
 function animate() {
   requestAnimationFrame(animate);
+  time++;
 
-  agents.forEach((a) => {
-    // Pass FlowField instead of exit for proper door navigation
-    a.update(agents, walls, flowField, emergency);
-  });
+  /* Update agents */
+  agents.forEach((a) => a.update(agents, walls, flowField, emergency));
+
+  /* HUD counter */
+  const alive = agents.filter((a) => !a.evacuated).length;
+  const evacuated = 150 - alive;
+  document.getElementById("agentCount").textContent = alive;
+  document.getElementById("evacCount").textContent = evacuated;
+
+  /* Red flash — decay each frame */
+  if (flashOpacity > 0) {
+    flashOpacity -= 0.012;
+    flashMat.opacity = Math.max(0, flashOpacity);
+  }
+
+  /* Pulse rings — spawn every 60 frames during emergency */
+  if (emergency) {
+    pulseTimer++;
+    if (pulseTimer % 60 === 0) createPulseRing();
+
+    // Exit glow pulse
+    exitGlow.material.opacity = 0.1 + 0.1 * Math.sin(time * 0.08);
+  }
+
+  /* Animate existing pulse rings */
+  for (let i = pulseRings.length - 1; i >= 0; i--) {
+    const ring = pulseRings[i];
+    ring._age += 0.025;
+    const scale = 1 + ring._age * 18;
+    ring.scale.set(scale, scale, 1);
+    ring.material.opacity = Math.max(0, 0.6 * (1 - ring._age));
+    if (ring._age >= 1) {
+      scene.remove(ring);
+      pulseRings.splice(i, 1);
+    }
+  }
 
   renderer.render(scene, camera);
 }
