@@ -1,38 +1,38 @@
 import * as THREE from "https://cdn.skypack.dev/three@0.152.2";
 
-export default class Wall{
+export default class Wall {
 
-constructor(a,b){
+constructor(start,end){
 
-this.a=a;
-this.b=b;
+this.start=start.clone();
+this.end=end.clone();
 
-const geometry=new THREE.BufferGeometry().setFromPoints([
-new THREE.Vector3(a.x,a.y,0),
-new THREE.Vector3(b.x,b.y,0)
+const geometry = new THREE.BufferGeometry().setFromPoints([
+new THREE.Vector3(start.x,start.y,0),
+new THREE.Vector3(end.x,end.y,0)
 ]);
 
-const material=new THREE.LineBasicMaterial({
+const material = new THREE.LineBasicMaterial({
 color:0xffffff
 });
 
-this.mesh=new THREE.Line(geometry,material);
+this.mesh = new THREE.Line(geometry,material);
 
 }
 
-closestPoint(p){
+closestPoint(point){
 
-const ab=this.b.clone().sub(this.a);
+const a=this.start;
+const b=this.end;
 
-const t=
-(p.clone().sub(this.a)).dot(ab)/
-ab.lengthSq();
+const ab=b.clone().sub(a);
+
+const t=point.clone().sub(a).dot(ab)/ab.lengthSq();
 
 const clamped=Math.max(0,Math.min(1,t));
 
-return this.a.clone().add(
-ab.multiplyScalar(clamped)
-);
+return a.clone().add(ab.multiplyScalar(clamped));
 
 }
+
 }
