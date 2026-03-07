@@ -2,9 +2,9 @@ import * as THREE from "https://cdn.skypack.dev/three@0.152.2";
 import Wall from "./wall.js";
 
 // Room floor color — subtle, dark tones so agents are always readable
-const ROOM_COLOR    = 0x0d1b2a;  // deep navy
-const CORRIDOR_COLOR = 0x0a1520; // slightly darker for corridor
-const FLOOR_COLOR   = 0x060e18;  // overall floor
+const ROOM_COLOR    = 0x0d1b2a;  
+const CORRIDOR_COLOR = 0x0a1520; 
+const FLOOR_COLOR   = 0x060e18;  
 
 export function createBuilding(scene) {
   const walls = [];
