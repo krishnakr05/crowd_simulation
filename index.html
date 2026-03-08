@@ -9,7 +9,13 @@ body { margin:0; overflow:hidden; background:black; }
 
 <body>
 
-<script type="module" src="main.js"></script>
+  <!-- Main simulation -->
+  <script type="module" src="main.js"></script>
+
+  <!-- Gesture detection — loads independently, imports triggerEmergency from main.js -->
+  <script type="module" src="gesture.js"></script>
+
+
 
 </body>
 </html>

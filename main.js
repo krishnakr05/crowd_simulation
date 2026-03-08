@@ -24,7 +24,6 @@ const { walls, doors, exit, exitMesh, exitGlow } = createBuilding(scene);
 const flowField = new FlowField(exit, doors);
 
 /* ── EMERGENCY FLASH OVERLAY ─────────────────────────────────────── */
-// A full-screen red plane that flashes when emergency is triggered
 const flashGeo = new THREE.PlaneGeometry(100, 60);
 const flashMat = new THREE.MeshBasicMaterial({
   color: 0xff2200,
@@ -32,12 +31,11 @@ const flashMat = new THREE.MeshBasicMaterial({
   opacity: 0,
 });
 const flashMesh = new THREE.Mesh(flashGeo, flashMat);
-flashMesh.position.set(0, 0, 10); // in front of everything
+flashMesh.position.set(0, 0, 10);
 flashMesh.renderOrder = 99;
 scene.add(flashMesh);
 
 /* ── ALARM PULSE RINGS ───────────────────────────────────────────── */
-// Expanding ring shapes that pulse from the exit when emergency triggers
 const pulseRings = [];
 function createPulseRing() {
   const ring = new THREE.Mesh(
@@ -55,7 +53,7 @@ function createPulseRing() {
   pulseRings.push(ring);
 }
 
-/* ── HTML OVERLAY (HUD) ──────────────────────────────────────────── */
+/* ── HUD ─────────────────────────────────────────────────────────── */
 const hud = document.createElement("div");
 hud.style.cssText = `
   position: fixed; top: 0; left: 0; width: 100%; pointer-events: none;
@@ -76,13 +74,15 @@ hud.innerHTML = `
 document.body.appendChild(hud);
 
 const clickHint = document.createElement("div");
+clickHint.id = "clickHint";
 clickHint.style.cssText = `
   position: fixed; bottom: 32px; left: 50%; transform: translateX(-50%);
   font-family: 'Courier New', monospace; color: #00ffcc;
   font-size: 13px; letter-spacing: 0.15em; opacity: 0.6;
   pointer-events: none; animation: blink 1.8s ease-in-out infinite;
+  text-align: center; line-height: 1.8;
 `;
-clickHint.textContent = "[ CLICK ANYWHERE TO TRIGGER EMERGENCY ]";
+clickHint.innerHTML = "[ CLICK ANYWHERE TO TRIGGER EMERGENCY ]<br><span id='gestureHint' style='font-size:11px; opacity:0.5;'>or raise your open palm to camera</span>";
 document.body.appendChild(clickHint);
 
 const style = document.createElement("style");
@@ -119,46 +119,46 @@ let flashOpacity = 0;
 let pulseTimer = 0;
 let time = 0;
 
-window.addEventListener("click", () => {
+/* ── TRIGGER EMERGENCY ───────────────────────────────────────────── */
+// Exported so gesture.js (and any other module) can call it directly.
+// The click handler also calls this so all trigger sources share
+// identical behaviour.
+export function triggerEmergency() {
   if (emergency) return;
   emergency = true;
-  flashOpacity = 0.45; // initial red flash
-  clickHint.style.display = "none";
+  flashOpacity = 0.45;
+  const hint = document.getElementById("clickHint");
+  if (hint) hint.style.display = "none";
   document.getElementById("status").textContent = "⚠ STATUS: EMERGENCY";
   document.getElementById("status").style.color = "#ff4400";
   document.getElementById("evacuated").style.opacity = "1";
-});
+}
+
+window.addEventListener("click", () => triggerEmergency());
 
 /* ── ANIMATE ─────────────────────────────────────────────────────── */
 function animate() {
   requestAnimationFrame(animate);
   time++;
 
-  /* Update agents */
   agents.forEach((a) => a.update(agents, walls, flowField, emergency));
 
-  /* HUD counter */
   const alive = agents.filter((a) => !a.evacuated).length;
   const evacuated = 150 - alive;
   document.getElementById("agentCount").textContent = alive;
   document.getElementById("evacCount").textContent = evacuated;
 
-  /* Red flash — decay each frame */
   if (flashOpacity > 0) {
     flashOpacity -= 0.012;
     flashMat.opacity = Math.max(0, flashOpacity);
   }
 
-  /* Pulse rings — spawn every 60 frames during emergency */
   if (emergency) {
     pulseTimer++;
     if (pulseTimer % 60 === 0) createPulseRing();
-
-    // Exit glow pulse
     exitGlow.material.opacity = 0.1 + 0.1 * Math.sin(time * 0.08);
   }
 
-  /* Animate existing pulse rings */
   for (let i = pulseRings.length - 1; i >= 0; i--) {
     const ring = pulseRings[i];
     ring._age += 0.025;
