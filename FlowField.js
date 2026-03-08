@@ -1,27 +1,16 @@
 import * as THREE from "https://cdn.skypack.dev/three@0.152.2";
 
-const CORRIDOR_WALL_X = 5; // corridor walls are at x = -5 and x = +5
-
-const ROOMS = [
-  { xMin: -30, xMax: -5, yMin:  7, yMax: 20, doorIndices: [0] },
-  { xMin: -30, xMax: -5, yMin: -7, yMax:  7, doorIndices: [1] },
-  { xMin: -30, xMax: -5, yMin:-20, yMax: -7, doorIndices: [2] },
-  { xMin:   5, xMax: 30, yMin:  7, yMax: 20, doorIndices: [3] },
-  { xMin:   5, xMax: 30, yMin: -7, yMax:  7, doorIndices: [4] },
-  { xMin:   5, xMax: 30, yMin:-20, yMax: -7, doorIndices: [5] },
-  { xMin:  -5, xMax:   5, yMin:-20, yMax: 20, doorIndices: [] },
-];
-
 export default class FlowField {
-  constructor(exit, doors) {
-    this.exit = exit.clone();
-    this.doors = doors;
+  constructor(exits, doors, rooms, waypoints) {
+    this.exits = exits;         // array of { pos: Vector2 }
+    this.doors = doors;         // array of Vector2
+    this.rooms = rooms;         // room definitions from layout
+    this.waypoints = waypoints; // array of Vector2 — corridor-side of each door
+    this.blockedExitIndex = -1; // -1 = none blocked
+  }
 
-    // Waypoints placed inside corridor past the wall
-    this.waypoints = doors.map((d) => {
-      const insideX = d.x < 0 ? -2 : 2;
-      return new THREE.Vector2(insideX, d.y);
-    });
+  setBlockedExit(index) {
+    this.blockedExitIndex = index;
   }
 
   getForce(position, state) {
@@ -30,34 +19,57 @@ export default class FlowField {
       state.assignedWaypoint = this._roomAwareDoorIndex(position);
     }
 
-    // Corridor agents go straight to exit
-    if (state.assignedWaypoint === -1) {
-      const dir = this.exit.clone().sub(position);
+    // Check if agent is in corridor right now
+    const inCorridor = this._isInCorridor(position);
+
+    if (state.assignedWaypoint === -1 || inCorridor) {
+      // Agent is in corridor — head to nearest open exit
+      const exitPos = this._nearestOpenExit(position);
+      if (!exitPos) return new THREE.Vector2(); // all exits blocked (shouldn't happen)
+      const dir = exitPos.clone().sub(position);
       if (dir.lengthSq() < 0.0001) return new THREE.Vector2();
       return dir.normalize();
     }
 
+    // Agent is in a room — head toward their assigned door waypoint
     const wp = this.waypoints[state.assignedWaypoint];
-    const isLeftDoor = wp.x < 0; // left doors: agent must cross to x > -5
-                                  // right doors: agent must cross to x < 5
-
-    // RE-EVALUATE every frame whether agent is in corridor or not.
-    // This is the core fix — not a one-time latch but a live position check.
-    // An agent is "through the door" only if they are actually on the
-    // corridor side of the wall right now.
-    const inCorridor = isLeftDoor
-      ? position.x > -CORRIDOR_WALL_X      // left room agent: in corridor when x > -5
-      : position.x <  CORRIDOR_WALL_X;     // right room agent: in corridor when x < 5
-
-    const target = inCorridor ? this.exit : wp;
-
-    const dir = target.clone().sub(position);
+    const dir = wp.clone().sub(position);
     if (dir.lengthSq() < 0.0001) return new THREE.Vector2();
     return dir.normalize();
   }
 
+  // Pick the nearest exit that isn't blocked
+  _nearestOpenExit(position) {
+    let best = null;
+    let bestDist = Infinity;
+    this.exits.forEach((exit, i) => {
+      if (i === this.blockedExitIndex) return;
+      const d = position.distanceTo(exit.pos);
+      if (d < bestDist) { bestDist = d; best = exit.pos; }
+    });
+    return best;
+  }
+
+  // Check if position is inside the corridor/open area
+  _isInCorridor(position) {
+    for (const room of this.rooms) {
+      if (room.inCorridor) {
+        // Corridor room — but we need to exclude actual rooms
+        continue;
+      }
+      if (
+        position.x >= room.xMin && position.x <= room.xMax &&
+        position.y >= room.yMin && position.y <= room.yMax
+      ) {
+        return false; // inside a room
+      }
+    }
+    return true; // not inside any named room = in corridor
+  }
+
   _roomAwareDoorIndex(position) {
-    for (const room of ROOMS) {
+    for (const room of this.rooms) {
+      if (room.inCorridor) continue;
       if (
         position.x >= room.xMin && position.x <= room.xMax &&
         position.y >= room.yMin && position.y <= room.yMax

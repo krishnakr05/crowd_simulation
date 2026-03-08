@@ -1,6 +1,6 @@
 import * as THREE from "https://cdn.skypack.dev/three@0.152.2";
 import Agent from "./agent.js";
-import { createBuilding } from "./building.js";
+import { createSymmetricLayout, createCourtyardLayout, createOfficeLayout } from "./building.js";
 import FlowField from "./FlowField.js";
 
 /* ── SCENE ───────────────────────────────────────────────────────── */
@@ -19,35 +19,25 @@ window.addEventListener("resize", () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
-/* ── BUILDING ────────────────────────────────────────────────────── */
-const { walls, doors, exit, exitMesh, exitGlow } = createBuilding(scene);
-const flowField = new FlowField(exit, doors);
-
 /* ── EMERGENCY FLASH OVERLAY ─────────────────────────────────────── */
-const flashGeo = new THREE.PlaneGeometry(100, 60);
 const flashMat = new THREE.MeshBasicMaterial({
-  color: 0xff2200,
-  transparent: true,
-  opacity: 0,
+  color: 0xff2200, transparent: true, opacity: 0,
 });
-const flashMesh = new THREE.Mesh(flashGeo, flashMat);
+const flashMesh = new THREE.Mesh(new THREE.PlaneGeometry(200, 100), flashMat);
 flashMesh.position.set(0, 0, 10);
 flashMesh.renderOrder = 99;
 scene.add(flashMesh);
 
-/* ── ALARM PULSE RINGS ───────────────────────────────────────────── */
+/* ── PULSE RINGS ─────────────────────────────────────────────────── */
 const pulseRings = [];
-function createPulseRing() {
+function createPulseRing(x, y) {
   const ring = new THREE.Mesh(
     new THREE.RingGeometry(0.5, 1.2, 32),
     new THREE.MeshBasicMaterial({
-      color: 0xff4400,
-      transparent: true,
-      opacity: 0.8,
-      side: THREE.DoubleSide,
+      color: 0xff4400, transparent: true, opacity: 0.8, side: THREE.DoubleSide,
     })
   );
-  ring.position.set(exit.x, exit.y, 0.5);
+  ring.position.set(x, y, 0.5);
   ring._age = 0;
   scene.add(ring);
   pulseRings.push(ring);
@@ -56,19 +46,20 @@ function createPulseRing() {
 /* ── HUD ─────────────────────────────────────────────────────────── */
 const hud = document.createElement("div");
 hud.style.cssText = `
-  position: fixed; top: 0; left: 0; width: 100%; pointer-events: none;
-  font-family: 'Courier New', monospace; color: #00ffcc;
-  padding: 18px 24px; box-sizing: border-box;
+  position:fixed; top:0; left:0; width:100%; pointer-events:none;
+  font-family:'Courier New',monospace; color:#00ffcc;
+  padding:18px 24px; box-sizing:border-box;
 `;
 hud.innerHTML = `
-  <div id="status" style="font-size:13px; letter-spacing:0.12em; opacity:0.7;">
-    STATUS: NORMAL
+  <div id="status" style="font-size:13px;letter-spacing:0.12em;opacity:0.7;">STATUS: NORMAL</div>
+  <div style="font-size:22px;font-weight:bold;margin-top:4px;">
+    AGENTS: <span id="agentCount">150</span> / <span id="agentTotal">150</span>
   </div>
-  <div id="counter" style="font-size:22px; font-weight:bold; margin-top:4px;">
-    AGENTS: <span id="agentCount">150</span> / 150
-  </div>
-  <div id="evacuated" style="font-size:13px; margin-top:2px; color:#00ff88; opacity:0;">
+  <div id="evacuated" style="font-size:13px;margin-top:2px;color:#00ff88;opacity:0;">
     EVACUATED: <span id="evacCount">0</span>
+  </div>
+  <div id="blockedNotice" style="font-size:12px;margin-top:4px;color:#ff4400;opacity:0;letter-spacing:0.1em;">
+    ⚠ EXIT BLOCKED — AGENTS REROUTING
   </div>
 `;
 document.body.appendChild(hud);
@@ -76,102 +67,236 @@ document.body.appendChild(hud);
 const clickHint = document.createElement("div");
 clickHint.id = "clickHint";
 clickHint.style.cssText = `
-  position: fixed; bottom: 32px; left: 50%; transform: translateX(-50%);
-  font-family: 'Courier New', monospace; color: #00ffcc;
-  font-size: 13px; letter-spacing: 0.15em; opacity: 0.6;
-  pointer-events: none; animation: blink 1.8s ease-in-out infinite;
-  text-align: center; line-height: 1.8;
+  position:fixed; bottom:32px; left:50%; transform:translateX(-50%);
+  font-family:'Courier New',monospace; color:#00ffcc;
+  font-size:13px; letter-spacing:0.15em; opacity:0.6;
+  pointer-events:none; animation:blink 1.8s ease-in-out infinite;
+  text-align:center; line-height:1.8;
 `;
-clickHint.innerHTML = "[ CLICK ANYWHERE TO TRIGGER EMERGENCY ]<br><span id='gestureHint' style='font-size:11px; opacity:0.5;'>or raise your open palm to camera</span>";
+clickHint.innerHTML = `[ CLICK ANYWHERE TO TRIGGER EMERGENCY ]<br>
+  <span style="font-size:11px;opacity:0.5;">or raise your open palm to camera</span>`;
 document.body.appendChild(clickHint);
 
-const style = document.createElement("style");
-style.textContent = `
-  @keyframes blink {
-    0%, 100% { opacity: 0.6; }
-    50%       { opacity: 0.15; }
-  }
-`;
-document.head.appendChild(style);
+const blinkStyle = document.createElement("style");
+blinkStyle.textContent = `@keyframes blink{0%,100%{opacity:0.6}50%{opacity:0.15}}`;
+document.head.appendChild(blinkStyle);
 
-/* ── AGENTS ──────────────────────────────────────────────────────── */
-const agents = [];
-
-function randomPosition() {
-  const rooms = [
-    [-25, 10], [10, 10],
-    [-25,  0], [10,  0],
-    [-25,-10], [10,-10],
-  ];
-  const r = rooms[Math.floor(Math.random() * rooms.length)];
-  return new THREE.Vector2(r[0] + Math.random() * 10, r[1] + Math.random() * 6);
-}
-
-for (let i = 0; i < 150; i++) {
-  const agent = new Agent(randomPosition(), doors, exit);
-  agent.addToScene(scene);
-  agents.push(agent);
-}
-
-/* ── STATE ───────────────────────────────────────────────────────── */
+/* ── SIMULATION STATE ────────────────────────────────────────────── */
+let agents = [];
+let walls = [];
+let flowField = null;
+let currentLayout = null;
 let emergency = false;
 let flashOpacity = 0;
 let pulseTimer = 0;
 let time = 0;
+let totalAgents = 150;
+
+/* ── WAYPOINT GENERATION ─────────────────────────────────────────── */
+// For each door, create a waypoint just inside the corridor.
+// The direction "inside" is inferred from which side of the room the door is on.
+function generateWaypoints(doors, rooms) {
+  return doors.map((door, doorIdx) => {
+    // Find which room owns this door
+    const ownerRoom = rooms.find(
+      (r) => !r.inCorridor && r.doorIndices.includes(doorIdx)
+    );
+    if (!ownerRoom) return door.clone(); // fallback
+
+    // Push waypoint toward center of corridor from door position
+    const roomCX = (ownerRoom.xMin + ownerRoom.xMax) / 2;
+    const roomCY = (ownerRoom.yMin + ownerRoom.yMax) / 2;
+
+    // Direction from room center to door
+    const toDoor = door.clone().sub(new THREE.Vector2(roomCX, roomCY)).normalize();
+
+    // Waypoint is 3 units past the door in that same direction (into corridor)
+    return door.clone().add(toDoor.multiplyScalar(3));
+  });
+}
+
+/* ── BUILD + RESET ───────────────────────────────────────────────── */
+function resetSimulation(layoutFn) {
+  // Remove old agent meshes
+  agents.forEach((a) => {
+    scene.remove(a.mesh);
+    a.trailMeshes.forEach((m) => scene.remove(m));
+  });
+  agents = [];
+
+  // Remove old building meshes and walls
+  if (currentLayout) {
+    currentLayout.walls.forEach((w) => scene.remove(w.mesh));
+    currentLayout.meshes.forEach((m) => scene.remove(m));
+    currentLayout.exits.forEach((e) => {
+      scene.remove(e.bar);
+      scene.remove(e.glow);
+    });
+  }
+
+  // Remove pulse rings
+  pulseRings.forEach((r) => scene.remove(r));
+  pulseRings.length = 0;
+
+  // Build new layout
+  currentLayout = layoutFn(scene);
+  walls = currentLayout.walls;
+
+  // Adjust camera for layout
+  if (currentLayout.name === 'courtyard') {
+    camera.left = -55; camera.right = 55;
+    camera.top = 35;   camera.bottom = -35;
+  } else if (currentLayout.name === 'office') {
+    camera.left = -50; camera.right = 50;
+    camera.top = 32;   camera.bottom = -32;
+  } else {
+    camera.left = -50; camera.right = 50;
+    camera.top = 30;   camera.bottom = -30;
+  }
+  camera.updateProjectionMatrix();
+
+  // Generate waypoints
+  const waypoints = generateWaypoints(currentLayout.doors, currentLayout.rooms);
+
+  // Build FlowField
+  flowField = new FlowField(
+    currentLayout.exits,
+    currentLayout.doors,
+    currentLayout.rooms,
+    waypoints
+  );
+
+  // Spawn agents
+  totalAgents = 150;
+  document.getElementById("agentTotal").textContent = totalAgents;
+
+  for (let i = 0; i < totalAgents; i++) {
+    const pos = randomSpawnPosition(currentLayout.spawnZones);
+    const agent = new Agent(pos, currentLayout.doors, currentLayout.exits[0].pos);
+    agent.addToScene(scene);
+    agents.push(agent);
+  }
+
+  // Reset state
+  emergency = false;
+  flashOpacity = 0;
+  pulseTimer = 0;
+  time = 0;
+  flashMat.opacity = 0;
+
+  const hint = document.getElementById("clickHint");
+  if (hint) { hint.style.display = "block"; }
+  document.getElementById("status").textContent = "STATUS: NORMAL";
+  document.getElementById("status").style.color = "#00ffcc";
+  document.getElementById("evacuated").style.opacity = "0";
+  document.getElementById("blockedNotice").style.opacity = "0";
+  document.getElementById("agentCount").textContent = totalAgents;
+  document.getElementById("evacCount").textContent = "0";
+
+  // Reset exit colors to green
+  currentLayout.exits.forEach((e) => {
+    e.bar.material.color.setHex(0x00ff88);
+    e.glow.material.color.setHex(0x00ff44);
+  });
+}
+
+function randomSpawnPosition(spawnZones) {
+  const z = spawnZones[Math.floor(Math.random() * spawnZones.length)];
+  return new THREE.Vector2(
+    z.cx + (Math.random() - 0.5) * z.w,
+    z.cy + (Math.random() - 0.5) * z.h
+  );
+}
 
 /* ── TRIGGER EMERGENCY ───────────────────────────────────────────── */
-// Exported so gesture.js (and any other module) can call it directly.
-// The click handler also calls this so all trigger sources share
-// identical behaviour.
 export function triggerEmergency() {
-  if (emergency) return;
+  if (emergency || !currentLayout) return;
   emergency = true;
   flashOpacity = 0.45;
+
   const hint = document.getElementById("clickHint");
   if (hint) hint.style.display = "none";
+
   document.getElementById("status").textContent = "⚠ STATUS: EMERGENCY";
   document.getElementById("status").style.color = "#ff4400";
   document.getElementById("evacuated").style.opacity = "1";
+
+  // Randomly block one exit
+  const blockedIdx = Math.floor(Math.random() * currentLayout.exits.length);
+  flowField.setBlockedExit(blockedIdx);
+
+  // Show blocked exit in red, keep others green
+  currentLayout.exits.forEach((e, i) => {
+    if (i === blockedIdx) {
+      e.bar.material.color.setHex(0xff2200);
+      e.glow.material.color.setHex(0xff2200);
+    }
+  });
+
+  document.getElementById("blockedNotice").style.opacity = "1";
+
+  // Pulse rings from all open exits
+  currentLayout.exits.forEach((e, i) => {
+    if (i !== blockedIdx) createPulseRing(e.pos.x, e.pos.y);
+  });
 }
 
 window.addEventListener("click", () => triggerEmergency());
+
+/* ── LAYOUT SWITCHER API (called from ui.js) ─────────────────────── */
+export function switchLayout(name) {
+  const map = {
+    symmetric: createSymmetricLayout,
+    courtyard: createCourtyardLayout,
+    office:    createOfficeLayout,
+  };
+  if (map[name]) resetSimulation(map[name]);
+}
 
 /* ── ANIMATE ─────────────────────────────────────────────────────── */
 function animate() {
   requestAnimationFrame(animate);
   time++;
 
-  agents.forEach((a) => a.update(agents, walls, flowField, emergency));
+  if (agents.length && flowField) {
+    agents.forEach((a) => a.update(agents, walls, flowField, emergency));
+  }
 
   const alive = agents.filter((a) => !a.evacuated).length;
-  const evacuated = 150 - alive;
   document.getElementById("agentCount").textContent = alive;
-  document.getElementById("evacCount").textContent = evacuated;
+  document.getElementById("evacCount").textContent = totalAgents - alive;
 
   if (flashOpacity > 0) {
     flashOpacity -= 0.012;
     flashMat.opacity = Math.max(0, flashOpacity);
   }
 
-  if (emergency) {
+  if (emergency && currentLayout) {
     pulseTimer++;
-    if (pulseTimer % 60 === 0) createPulseRing();
-    exitGlow.material.opacity = 0.1 + 0.1 * Math.sin(time * 0.08);
+    if (pulseTimer % 60 === 0) {
+      const blockedIdx = flowField.blockedExitIndex;
+      currentLayout.exits.forEach((e, i) => {
+        if (i !== blockedIdx) createPulseRing(e.pos.x, e.pos.y);
+      });
+    }
+    currentLayout.exits.forEach((e, i) => {
+      if (i !== flowField.blockedExitIndex) {
+        e.glow.material.opacity = 0.1 + 0.1 * Math.sin(time * 0.08);
+      }
+    });
   }
 
   for (let i = pulseRings.length - 1; i >= 0; i--) {
     const ring = pulseRings[i];
     ring._age += 0.025;
-    const scale = 1 + ring._age * 18;
-    ring.scale.set(scale, scale, 1);
+    ring.scale.set(1 + ring._age * 18, 1 + ring._age * 18, 1);
     ring.material.opacity = Math.max(0, 0.6 * (1 - ring._age));
-    if (ring._age >= 1) {
-      scene.remove(ring);
-      pulseRings.splice(i, 1);
-    }
+    if (ring._age >= 1) { scene.remove(ring); pulseRings.splice(i, 1); }
   }
 
   renderer.render(scene, camera);
 }
 
+/* ── INIT ────────────────────────────────────────────────────────── */
+resetSimulation(createSymmetricLayout);
 animate();
