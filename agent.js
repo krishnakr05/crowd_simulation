@@ -96,9 +96,9 @@ export default class Agent {
       const closest = w.closestPoint(this.position);
       const diff = this.position.clone().sub(closest);
       const dist = diff.length();
-      if (dist < 1.5 && dist > 0.01) {
-        const pushStrength = (1.5 - dist) / 1.5; // 0 at edge, 1 at wall
-        moveDir.add(diff.normalize().multiplyScalar(pushStrength * 1.2));
+      if (dist < 1.2 && dist > 0.01) {
+        const pushStrength = (1.2 - dist) / 1.2;
+        moveDir.add(diff.normalize().multiplyScalar(pushStrength * 1.0));
       }
     });
 

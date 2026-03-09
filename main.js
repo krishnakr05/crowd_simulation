@@ -141,8 +141,8 @@ function resetSimulation(layoutFn) {
 
   // Adjust camera for layout
   if (currentLayout.name === 'courtyard') {
-    camera.left = -55; camera.right = 55;
-    camera.top = 35;   camera.bottom = -35;
+    camera.left = -60; camera.right = 60;
+    camera.top = 38;   camera.bottom = -38;
   } else if (currentLayout.name === 'office') {
     camera.left = -50; camera.right = 50;
     camera.top = 32;   camera.bottom = -32;
@@ -160,8 +160,7 @@ function resetSimulation(layoutFn) {
     currentLayout.exits,
     currentLayout.doors,
     currentLayout.rooms,
-    waypoints,
-    currentLayout.junctions || null
+    waypoints
   );
 
   // Spawn agents
