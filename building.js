@@ -138,7 +138,7 @@ export function createSymmetricLayout(scene) {
     { cx:  20, cy: -13, w: 18, h: 10 },
   ];
 
-  return { walls, doors, meshes, exits: [exitBottom, exitTop], rooms, spawnZones, name: 'symmetric' };
+  return { walls, doors, meshes, exits: [exitBottom, exitTop], rooms, spawnZones, corridorCenter: new THREE.Vector2(0, 0), name: 'symmetric' };
 }
 
 /* ════════════════════════════════════════════════════════════════════
@@ -192,17 +192,19 @@ export function createCourtyardLayout(scene) {
   meshes.push(makeFloor(scene,  30,  0, 16, 20, CORRIDOR_COLOR));
 
   // Classroom floors (unchanged — these are correct)
-  // CL1/CL3/CL4/CL6 shrunk so their outer edge stops at x=±30 (exit zones are x:±38→±30)
+  // CL1/CL3/CL4/CL6: outer edge stops at x=±30 (exit zones are x:±38→±30)
+  // CL2/CL5: widened to x:-14→14 to fill gaps between corner and center classrooms
+  // CL7/CL8/CL9/CL10: stretched to meet at y=0 with no gap
   meshes.push(makeFloor(scene, -22,  18, 16, 8));  // CL1: x:-30→-14, y:14→22
-  meshes.push(makeFloor(scene,   0,  18, 20, 8));  // CL2: x:-10→ 10, y:14→22
+  meshes.push(makeFloor(scene,   0,  18, 28, 8));  // CL2: x:-14→ 14, y:14→22
   meshes.push(makeFloor(scene,  22,  18, 16, 8));  // CL3: x: 14→ 30, y:14→22
   meshes.push(makeFloor(scene, -22, -18, 16, 8));  // CL4: x:-30→-14, y:-22→-14
-  meshes.push(makeFloor(scene,   0, -18, 20, 8));  // CL5: x:-10→ 10, y:-22→-14
+  meshes.push(makeFloor(scene,   0, -18, 28, 8));  // CL5: x:-14→ 14, y:-22→-14
   meshes.push(makeFloor(scene,  22, -18, 16, 8));  // CL6: x: 14→ 30, y:-22→-14
-  meshes.push(makeFloor(scene, -30,   6, 16, 10)); // CL7: x:-38→-22, y:  1→ 11
-  meshes.push(makeFloor(scene, -30,  -6, 16, 10)); // CL8: x:-38→-22, y:-11→ -1
-  meshes.push(makeFloor(scene,  30,   6, 16, 10)); // CL9: x: 22→ 38, y:  1→ 11
-  meshes.push(makeFloor(scene,  30,  -6, 16, 10)); // CL10:x: 22→ 38, y:-11→ -1
+  meshes.push(makeFloor(scene, -30, 5.5, 16, 11)); // CL7: x:-38→-22, y: 0→11
+  meshes.push(makeFloor(scene, -30,-5.5, 16, 11)); // CL8: x:-38→-22, y:-11→ 0
+  meshes.push(makeFloor(scene,  30, 5.5, 16, 11)); // CL9: x: 22→ 38, y: 0→11
+  meshes.push(makeFloor(scene,  30,-5.5, 16, 11)); // CL10:x: 22→ 38, y:-11→ 0
 
   makeGrid(scene, -38, 38, -22, 22, 4);
 
@@ -247,126 +249,88 @@ export function createCourtyardLayout(scene) {
   ─────────────────────────────────────────────────────────────────── */
 
   /* CL1: x:-30→-14, y:14→22
-     - Top (y=22): OMIT (outer wall)
-     - Left (x=-30): left edge is now exactly where exit gap ends — DRAW.
-     - Right (x=-14): DRAW.
-     - Bottom (y=14): door gap centered x=-22, gap x:-24→-20.
+     - Bottom (y=14): door gap centered x=-22, gap x:-25→-19 (6 units wide)
   */
   add(v(-30,  22), v(-30,  14)); // CL1 left wall
   add(v(-14,  22), v(-14,  14)); // CL1 right wall
-  add(v(-30,  14), v(-24,  14)); // CL1 bottom — left of door
-  add(v(-20,  14), v(-14,  14)); // CL1 bottom — right of door
+  add(v(-30,  14), v(-25,  14)); // CL1 bottom — left of door
+  add(v(-19,  14), v(-14,  14)); // CL1 bottom — right of door
 
-  /* CL2: x:-10→10, y:14→22
-     - Top (y=22): OMIT (outer wall)
-     - Left (x=-10): runs y:14→22. NOT in corner. DRAW.
-     - Right (x=10): runs y:14→22. NOT in corner. DRAW.
-     - Bottom (y=14): door gap centered x=0, gap x:-2→2.
+  /* CL2: x:-14→14, y:14→22
+     - Bottom (y=14): door gap centered x=0, gap x:-4→4 (8 units wide)
   */
-  add(v(-10,  22), v(-10,  14)); // CL2 left wall
-  add(v( 10,  22), v( 10,  14)); // CL2 right wall
-  add(v(-10,  14), v( -2,  14)); // CL2 bottom — left of door
-  add(v(  2,  14), v( 10,  14)); // CL2 bottom — right of door
+  add(v(-14,  14), v( -4,  14)); // CL2 bottom — left of door
+  add(v(  4,  14), v( 14,  14)); // CL2 bottom — right of door
 
   /* CL3: x:14→30, y:14→22
-     - Top (y=22): OMIT (outer wall)
-     - Left (x=14): DRAW.
-     - Right (x=30): right edge stops exactly where exit gap starts — DRAW.
-     - Bottom (y=14): door gap centered x=22, gap x:20→24.
+     - Bottom (y=14): door gap centered x=22, gap x:19→25 (6 units wide)
   */
   add(v( 14,  22), v( 14,  14)); // CL3 left wall
   add(v( 30,  22), v( 30,  14)); // CL3 right wall
-  add(v( 14,  14), v( 20,  14)); // CL3 bottom — left of door
-  add(v( 24,  14), v( 30,  14)); // CL3 bottom — right of door
+  add(v( 14,  14), v( 19,  14)); // CL3 bottom — left of door
+  add(v( 25,  14), v( 30,  14)); // CL3 bottom — right of door
 
-  /* CL4: x:-30→-14, y:-22→-14  (mirror of CL1)
-     - Bottom (y=-22): OMIT (outer wall)
-     - Left (x=-30): DRAW.
-     - Right (x=-14): DRAW.
-     - Top (y=-14): door gap centered x=-22, gap x:-24→-20.
+  /* CL4: x:-30→-14, y:-22→-14
+     - Top (y=-14): door gap centered x=-22, gap x:-25→-19 (6 units wide)
   */
   add(v(-30, -22), v(-30, -14)); // CL4 left wall
   add(v(-14, -22), v(-14, -14)); // CL4 right wall
-  add(v(-30, -14), v(-24, -14)); // CL4 top — left of door
-  add(v(-20, -14), v(-14, -14)); // CL4 top — right of door
+  add(v(-30, -14), v(-25, -14)); // CL4 top — left of door
+  add(v(-19, -14), v(-14, -14)); // CL4 top — right of door
 
-  /* CL5: x:-10→10, y:-22→-14  (mirror of CL2)
-     - Bottom (y=-22): OMIT (outer wall)
-     - Left (x=-10): DRAW.
-     - Right (x=10): DRAW.
-     - Top (y=-14): door gap centered x=0, gap x:-2→2.
+  /* CL5: x:-14→14, y:-22→-14
+     - Top (y=-14): door gap centered x=0, gap x:-4→4 (8 units wide)
   */
-  add(v(-10, -22), v(-10, -14)); // CL5 left wall
-  add(v( 10, -22), v( 10, -14)); // CL5 right wall
-  add(v(-10, -14), v( -2, -14)); // CL5 top — left of door
-  add(v(  2, -14), v( 10, -14)); // CL5 top — right of door
+  add(v(-14, -14), v( -4, -14)); // CL5 top — left of door
+  add(v(  4, -14), v( 14, -14)); // CL5 top — right of door
 
-  /* CL6: x:14→30, y:-22→-14  (mirror of CL3)
-     - Bottom (y=-22): OMIT (outer wall)
-     - Left (x=14): DRAW.
-     - Right (x=30): DRAW.
-     - Top (y=-14): door gap centered x=22, gap x:20→24.
+  /* CL6: x:14→30, y:-22→-14
+     - Top (y=-14): door gap centered x=22, gap x:19→25 (6 units wide)
   */
   add(v( 14, -22), v( 14, -14)); // CL6 left wall
   add(v( 30, -22), v( 30, -14)); // CL6 right wall
-  add(v( 14, -14), v( 20, -14)); // CL6 top — left of door
-  add(v( 24, -14), v( 30, -14)); // CL6 top — right of door (stop at x=30)
+  add(v( 14, -14), v( 19, -14)); // CL6 top — left of door
+  add(v( 25, -14), v( 30, -14)); // CL6 top — right of door
 
-  /* CL7: x:-38→-22, y:1→11
-     - Left (x=-38): OMIT (outer wall)
-     - Top (y=11): DRAW full.
-     - Bottom (y=1): DRAW full.
-     - Right (x=-22): door gap centered y=6, gap y:4→8.
+  /* CL7: x:-38→-22, y:0→11
+     - Right (x=-22): door gap centered y=5.5, gap y:2.5→8.5 (6 units wide)
   */
   add(v(-38,  11), v(-22,  11)); // CL7 top wall
-  add(v(-38,   1), v(-22,   1)); // CL7 bottom wall
-  add(v(-22,  11), v(-22,   8)); // CL7 right — above door
-  add(v(-22,   4), v(-22,   1)); // CL7 right — below door
+  add(v(-22,  11), v(-22, 8.5)); // CL7 right — above door
+  add(v(-22, 2.5), v(-22,   0)); // CL7 right — below door
 
-  /* CL8: x:-38→-22, y:-11→-1  (mirror of CL7)
-     - Left (x=-38): OMIT (outer wall)
-     - Top (y=-1): DRAW full.
-     - Bottom (y=-11): DRAW full.
-     - Right (x=-22): door gap centered y=-6, gap y:-8→-4.
+  /* CL8: x:-38→-22, y:-11→0
+     - Right (x=-22): door gap centered y=-5.5, gap y:-8.5→-2.5 (6 units wide)
   */
-  add(v(-38,  -1), v(-22,  -1)); // CL8 top wall
   add(v(-38, -11), v(-22, -11)); // CL8 bottom wall
-  add(v(-22,  -1), v(-22,  -4)); // CL8 right — above door
-  add(v(-22,  -8), v(-22, -11)); // CL8 right — below door
+  add(v(-22,   0), v(-22,-2.5)); // CL8 right — above door
+  add(v(-22,-8.5), v(-22, -11)); // CL8 right — below door
 
-  /* CL9: x:22→38, y:1→11  (mirror of CL7)
-     - Right (x=38): OMIT (outer wall)
-     - Top (y=11): DRAW full.
-     - Bottom (y=1): DRAW full.
-     - Left (x=22): door gap centered y=6, gap y:4→8.
+  /* CL9: x:22→38, y:0→11
+     - Left (x=22): door gap centered y=5.5, gap y:2.5→8.5 (6 units wide)
   */
   add(v( 22,  11), v( 38,  11)); // CL9 top wall
-  add(v( 22,   1), v( 38,   1)); // CL9 bottom wall
-  add(v( 22,  11), v( 22,   8)); // CL9 left — above door
-  add(v( 22,   4), v( 22,   1)); // CL9 left — below door
+  add(v( 22,  11), v( 22, 8.5)); // CL9 left — above door
+  add(v( 22, 2.5), v( 22,   0)); // CL9 left — below door
 
-  /* CL10: x:22→38, y:-11→-1  (mirror of CL8)
-     - Right (x=38): OMIT (outer wall)
-     - Top (y=-1): DRAW full.
-     - Bottom (y=-11): DRAW full.
-     - Left (x=22): door gap centered y=-6, gap y:-8→-4.
+  /* CL10: x:22→38, y:-11→0
+     - Left (x=22): door gap centered y=-5.5, gap y:-8.5→-2.5 (6 units wide)
   */
-  add(v( 22,  -1), v( 38,  -1)); // CL10 top wall
   add(v( 22, -11), v( 38, -11)); // CL10 bottom wall
-  add(v( 22,  -1), v( 22,  -4)); // CL10 left — above door
-  add(v( 22,  -8), v( 22, -11)); // CL10 left — below door
+  add(v( 22,   0), v( 22,-2.5)); // CL10 left — above door
+  add(v( 22,-8.5), v( 22, -11)); // CL10 left — below door
 
   /* ── DOORS ───────────────────────────────────────────────────────── */
-  doors.push(v(-22,  14)); // 0 CL1  — bottom wall, centered x=-22
-  doors.push(v(  0,  14)); // 1 CL2  — bottom wall, centered x=0
-  doors.push(v( 22,  14)); // 2 CL3  — bottom wall, centered x=22
-  doors.push(v(-22, -14)); // 3 CL4  — top wall, centered x=-22
-  doors.push(v(  0, -14)); // 4 CL5  — top wall, centered x=0
-  doors.push(v( 22, -14)); // 5 CL6  — top wall, centered x=22
-  doors.push(v(-22,   6)); // 6 CL7  — right wall, centered y=6
-  doors.push(v(-22,  -6)); // 7 CL8  — right wall, centered y=-6
-  doors.push(v( 22,   6)); // 8 CL9  — left wall, centered y=6
-  doors.push(v( 22,  -6)); // 9 CL10 — left wall, centered y=-6
+  doors.push(v(-22,  14)); // 0 CL1 — center of gap x:-25→-19
+  doors.push(v(  0,  14)); // 1 CL2 — center of gap x:-4→4
+  doors.push(v( 22,  14)); // 2 CL3 — center of gap x:19→25
+  doors.push(v(-22, -14)); // 3 CL4
+  doors.push(v(  0, -14)); // 4 CL5
+  doors.push(v( 22, -14)); // 5 CL6
+  doors.push(v(-22, 5.5)); // 6 CL7 — center of gap y:2.5→8.5
+  doors.push(v(-22,-5.5)); // 7 CL8 — center of gap y:-8.5→-2.5
+  doors.push(v( 22, 5.5)); // 8 CL9
+  doors.push(v( 22,-5.5)); // 9 CL10
   doors.forEach((d, i) => makeDoorMarker(scene, d.x, d.y, i >= 6));
 
   /* ── EXITS ───────────────────────────────────────────────────────── */
@@ -381,32 +345,64 @@ export function createCourtyardLayout(scene) {
 
   const rooms = [
     { xMin: -30, xMax: -14, yMin:  14, yMax:  22, doorIndices: [0] }, // CL1
-    { xMin: -10, xMax:  10, yMin:  14, yMax:  22, doorIndices: [1] }, // CL2
+    { xMin: -14, xMax:  14, yMin:  14, yMax:  22, doorIndices: [1] }, // CL2
     { xMin:  14, xMax:  30, yMin:  14, yMax:  22, doorIndices: [2] }, // CL3
     { xMin: -30, xMax: -14, yMin: -22, yMax: -14, doorIndices: [3] }, // CL4
-    { xMin: -10, xMax:  10, yMin: -22, yMax: -14, doorIndices: [4] }, // CL5
+    { xMin: -14, xMax:  14, yMin: -22, yMax: -14, doorIndices: [4] }, // CL5
     { xMin:  14, xMax:  30, yMin: -22, yMax: -14, doorIndices: [5] }, // CL6
-    { xMin: -38, xMax: -22, yMin:   1, yMax:  11, doorIndices: [6] }, // CL7
-    { xMin: -38, xMax: -22, yMin: -11, yMax:  -1, doorIndices: [7] }, // CL8
-    { xMin:  22, xMax:  38, yMin:   1, yMax:  11, doorIndices: [8] }, // CL9
-    { xMin:  22, xMax:  38, yMin: -11, yMax:  -1, doorIndices: [9] }, // CL10
+    { xMin: -38, xMax: -22, yMin:   0, yMax:  11, doorIndices: [6] }, // CL7
+    { xMin: -38, xMax: -22, yMin: -11, yMax:   0, doorIndices: [7] }, // CL8
+    { xMin:  22, xMax:  38, yMin:   0, yMax:  11, doorIndices: [8] }, // CL9
+    { xMin:  22, xMax:  38, yMin: -11, yMax:   0, doorIndices: [9] }, // CL10
+    { xMin: -18, xMax:  18, yMin: -10, yMax:  10, doorIndices: [], isBlocked: true }, // courtyard
     { xMin: -38, xMax:  38, yMin: -22, yMax:  22, doorIndices: [], inCorridor: true },
   ];
 
   const spawnZones = [
     { cx: -22, cy:  18, w: 14, h: 6 }, // CL1
-    { cx:   0, cy:  18, w: 18, h: 6 }, // CL2
+    { cx:   0, cy:  18, w: 26, h: 6 }, // CL2
     { cx:  22, cy:  18, w: 14, h: 6 }, // CL3
     { cx: -22, cy: -18, w: 14, h: 6 }, // CL4
-    { cx:   0, cy: -18, w: 18, h: 6 }, // CL5
+    { cx:   0, cy: -18, w: 26, h: 6 }, // CL5
     { cx:  22, cy: -18, w: 14, h: 6 }, // CL6
-    { cx: -30, cy:   6, w: 12, h: 8 },
-    { cx: -30, cy:  -6, w: 12, h: 8 },
-    { cx:  30, cy:   6, w: 12, h: 8 },
-    { cx:  30, cy:  -6, w: 12, h: 8 },
+    { cx: -30, cy: 5.5, w: 12, h: 9 }, // CL7
+    { cx: -30, cy:-5.5, w: 12, h: 9 }, // CL8
+    { cx:  30, cy: 5.5, w: 12, h: 9 }, // CL9
+    { cx:  30, cy:-5.5, w: 12, h: 9 }, // CL10
   ];
 
-  return { walls, doors, meshes, exits: [exitNW, exitNE, exitSW, exitSE], rooms, spawnZones, name: 'courtyard' };
+  // Waypoints: in corridor, aligned with door center x/y.
+  // y=±12 is safely between classroom walls (y=±14) and CL7-10 bounds (y=±11).
+  // x=±19 is safely between courtyard wall (x=±18) and classroom wall (x=±22).
+  const waypoints = [
+    new THREE.Vector2(-22,  12), // 0 CL1  — door at (-22,14)
+    new THREE.Vector2(  0,  12), // 1 CL2
+    new THREE.Vector2( 22,  12), // 2 CL3
+    new THREE.Vector2(-22, -12), // 3 CL4  — door at (-22,-14)
+    new THREE.Vector2(  0, -12), // 4 CL5
+    new THREE.Vector2( 22, -12), // 5 CL6
+    new THREE.Vector2(-19,  5.5),// 6 CL7  — door at (-22,5.5)
+    new THREE.Vector2(-19, -5.5),// 7 CL8
+    new THREE.Vector2( 19,  5.5),// 8 CL9
+    new THREE.Vector2( 19, -5.5),// 9 CL10
+  ];
+
+  // Junction points where side corridors meet top/bottom corridors.
+  // Agents in the side strips must pass through these before heading to an exit.
+  const junctions = [
+    new THREE.Vector2(-22,  12), // NW junction — top of left corridor
+    new THREE.Vector2(-22, -12), // SW junction — bottom of left corridor
+    new THREE.Vector2( 22,  12), // NE junction — top of right corridor
+    new THREE.Vector2( 22, -12), // SE junction — bottom of right corridor
+  ];
+
+  return {
+    walls, doors, meshes,
+    exits: [exitNW, exitNE, exitSW, exitSE],
+    rooms, spawnZones, waypoints, junctions,
+    corridorCenter: new THREE.Vector2(0, 0),
+    name: 'courtyard'
+  };
 }
 
 /* ════════════════════════════════════════════════════════════════════
@@ -548,5 +544,5 @@ export function createOfficeLayout(scene) {
     { cx:  24, cy: -14, w: 16, h:  8 }, // Office D
   ];
 
-  return { walls, doors, meshes, exits: [exitA, exitB], rooms, spawnZones, name: 'office' };
+  return { walls, doors, meshes, exits: [exitA, exitB], rooms, spawnZones, corridorCenter: new THREE.Vector2(0, 0), name: 'office' };
 }

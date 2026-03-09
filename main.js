@@ -93,24 +93,21 @@ let time = 0;
 let totalAgents = 150;
 
 /* ── WAYPOINT GENERATION ─────────────────────────────────────────── */
-// For each door, create a waypoint just inside the corridor.
-// The direction "inside" is inferred from which side of the room the door is on.
-function generateWaypoints(doors, rooms) {
+// Waypoints are defined explicitly in each layout alongside doors.
+// Each waypoint is a safe point inside the corridor just past the door,
+// guaranteed not to be inside any wall or corner exit zone.
+// If a layout provides waypoints, use them directly.
+// Otherwise fall back to computing from room geometry.
+function generateWaypoints(doors, rooms, explicitWaypoints) {
+  if (explicitWaypoints) return explicitWaypoints;
   return doors.map((door, doorIdx) => {
-    // Find which room owns this door
     const ownerRoom = rooms.find(
       (r) => !r.inCorridor && r.doorIndices.includes(doorIdx)
     );
-    if (!ownerRoom) return door.clone(); // fallback
-
-    // Push waypoint toward center of corridor from door position
+    if (!ownerRoom) return door.clone();
     const roomCX = (ownerRoom.xMin + ownerRoom.xMax) / 2;
     const roomCY = (ownerRoom.yMin + ownerRoom.yMax) / 2;
-
-    // Direction from room center to door
     const toDoor = door.clone().sub(new THREE.Vector2(roomCX, roomCY)).normalize();
-
-    // Waypoint is 3 units past the door in that same direction (into corridor)
     return door.clone().add(toDoor.multiplyScalar(3));
   });
 }
@@ -156,14 +153,15 @@ function resetSimulation(layoutFn) {
   camera.updateProjectionMatrix();
 
   // Generate waypoints
-  const waypoints = generateWaypoints(currentLayout.doors, currentLayout.rooms);
+  const waypoints = generateWaypoints(currentLayout.doors, currentLayout.rooms, currentLayout.waypoints);
 
   // Build FlowField
   flowField = new FlowField(
     currentLayout.exits,
     currentLayout.doors,
     currentLayout.rooms,
-    waypoints
+    waypoints,
+    currentLayout.junctions || null
   );
 
   // Spawn agents
@@ -172,7 +170,7 @@ function resetSimulation(layoutFn) {
 
   for (let i = 0; i < totalAgents; i++) {
     const pos = randomSpawnPosition(currentLayout.spawnZones);
-    const agent = new Agent(pos, currentLayout.doors, currentLayout.exits[0].pos);
+    const agent = new Agent(pos, currentLayout.doors, currentLayout.exits);
     agent.addToScene(scene);
     agents.push(agent);
   }
