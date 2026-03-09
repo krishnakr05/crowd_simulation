@@ -290,10 +290,10 @@ export function createCourtyardLayout(scene) {
   // approachPt is at x=±29, y=±13 — just outside CL7/CL8 inner walls (x=±30),
   // above/below CL7/CL8 vertical bounds (y:-10→10). All paths to approachPt
   // stay in open corridor and never cross any room.
-  const exitNW = makeExit(scene, -36,  25, false); exitNW.pos = v(-36,  13); exitNW.approachPt = v(-29,  13); exitNW.columnPt = v(-27, 11);
-  const exitNE = makeExit(scene,  36,  25, false); exitNE.pos = v( 36,  13); exitNE.approachPt = v( 29,  13); exitNE.columnPt = v( 27, 11);
-  const exitSW = makeExit(scene, -36, -25, false); exitSW.pos = v(-36, -13); exitSW.approachPt = v(-29, -13); exitSW.columnPt = v(-27,-11);
-  const exitSE = makeExit(scene,  36, -25, false); exitSE.pos = v( 36, -13); exitSE.approachPt = v( 29, -13); exitSE.columnPt = v( 27,-11);
+  const exitNW = makeExit(scene, -36,  25, false); exitNW.pos = v(-36,  25); exitNW.approachPt = v(-29,  13); exitNW.columnPt = v(-27, 11);
+  const exitNE = makeExit(scene,  36,  25, false); exitNE.pos = v( 36,  25); exitNE.approachPt = v( 29,  13); exitNE.columnPt = v( 27, 11);
+  const exitSW = makeExit(scene, -36, -25, false); exitSW.pos = v(-36, -25); exitSW.approachPt = v(-29, -13); exitSW.columnPt = v(-27,-11);
+  const exitSE = makeExit(scene,  36, -25, false); exitSE.pos = v( 36, -25); exitSE.approachPt = v( 29, -13); exitSE.columnPt = v( 27,-11);
 
   /* ── ROOMS ───────────────────────────────────────────────────────── */
   const rooms = [
