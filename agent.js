@@ -1,47 +1,41 @@
 import * as THREE from "https://cdn.skypack.dev/three@0.152.2";
 
 // Color ramp: calm (blue) → moderate (yellow) → stressed (red)
-// Input t in [0, 1]
 function stressColor(t) {
   t = Math.max(0, Math.min(1, t));
   if (t < 0.5) {
-    // blue → yellow
     const s = t * 2;
     return new THREE.Color(s, s, 1 - s);
   } else {
-    // yellow → red
     const s = (t - 0.5) * 2;
     return new THREE.Color(1, 1 - s, 0);
   }
 }
 
-const TRAIL_LENGTH = 10; // number of trail segments per agent
+const TRAIL_LENGTH = 10;
 
 export default class Agent {
-  constructor(position, doors, exit) {
+  constructor(position, doors, exits) {
     this.position = position.clone();
     this.doors = doors;
-    this.exit = exit;
-
-    this.velocity = new THREE.Vector2(
-      (Math.random() - 0.5) * 0.02,
-      (Math.random() - 0.5) * 0.02
-    );
+    // exits can be a single Vector2 (legacy) or array of {pos} objects
+    this.exits = Array.isArray(exits)
+      ? exits.map(e => e.pos ? e.pos : e)
+      : [exits];
 
     this.radius = 0.5;
     this.desiredSpeed = 0.07 + Math.random() * 0.03;
-    this.tau = 1.0;
     this.navState = {};
     this.evacuated = false;
-
-    // Stress value 0–1, smoothly updated each frame
     this.stress = 0;
 
-    // Trail: circular buffer of past positions
+    // velocity is now only used for trail rendering and stress calculation
+    // it is recomputed fresh every frame — never accumulated
+    this.velocity = new THREE.Vector2();
+
     this.trailPositions = [];
     this.trailMeshes = [];
 
-    // Agent body mesh
     this.mesh = new THREE.Mesh(
       new THREE.CircleGeometry(this.radius, 10),
       new THREE.MeshBasicMaterial({ color: stressColor(0) })
@@ -49,16 +43,14 @@ export default class Agent {
     this.mesh.position.set(this.position.x, this.position.y, 0);
     this.mesh.renderOrder = 2;
 
-    // Build trail dot meshes (small, semi-transparent)
     for (let i = 0; i < TRAIL_LENGTH; i++) {
-      const alpha = (i / TRAIL_LENGTH) * 0.35;
-      const r = this.radius * (i / TRAIL_LENGTH) * 0.7;
+      const r = this.radius * ((TRAIL_LENGTH - i) / TRAIL_LENGTH) * 0.7;
       const m = new THREE.Mesh(
         new THREE.CircleGeometry(Math.max(r, 0.05), 6),
         new THREE.MeshBasicMaterial({
           color: stressColor(0),
           transparent: true,
-          opacity: alpha,
+          opacity: 0,
         })
       );
       m.position.set(this.position.x, this.position.y, 0);
@@ -67,7 +59,6 @@ export default class Agent {
     }
   }
 
-  // Call after construction to add trail meshes to scene
   addToScene(scene) {
     scene.add(this.mesh);
     this.trailMeshes.forEach((m) => scene.add(m));
@@ -76,111 +67,145 @@ export default class Agent {
   update(agents, walls, flowField, emergency) {
     if (this.evacuated) return;
 
-    let force = new THREE.Vector2();
+    const prevPosition = this.position.clone();
 
-    /* ── IDLE DRIFT ─────────────────────────────────────────────── */
+    /* ── STEP 1: COMPUTE DESIRED MOVE DIRECTION ─────────────────────
+     * Start with a clean desired direction each frame.
+     * No velocity history. No accumulation. Purely kinematic.
+     * ─────────────────────────────────────────────────────────────── */
+    let moveDir = new THREE.Vector2();
+
     if (!emergency) {
-      force.add(new THREE.Vector2(
-        (Math.random() - 0.5) * 0.003,
-        (Math.random() - 0.5) * 0.003
+      // Idle: tiny random drift
+      moveDir.add(new THREE.Vector2(
+        (Math.random() - 0.5) * 0.3,
+        (Math.random() - 0.5) * 0.3
       ));
-      this.velocity.multiplyScalar(0.9);
+    } else if (flowField) {
+      // Emergency: move toward goal
+      const goalDir = flowField.getForce(this.position, this.navState);
+      moveDir.add(goalDir);
     }
 
-    /* ── GOAL FORCE ─────────────────────────────────────────────── */
-    if (emergency && flowField) {
-      const dir = flowField.getForce(this.position, this.navState);
-      const desiredVel = dir.multiplyScalar(this.desiredSpeed);
-      const goalForce = desiredVel.sub(this.velocity).multiplyScalar(1 / this.tau);
-      force.add(goalForce);
-    }
-
-    /* ── AGENT REPULSION ─────────────────────────────────────────── */
-    let crowdPressure = 0;
-    agents.forEach((other) => {
-      if (other === this || other.evacuated) return;
-      const diff = this.position.clone().sub(other.position);
-      const dist = diff.length();
-      const minDist = this.radius + other.radius;
-      if (dist < minDist * 3.5 && dist > 0.01) {
-        const overlap = minDist - dist;
-        const strength = overlap > 0
-          ? 0.12 + overlap * 0.35
-          : 0.012 * Math.exp(-dist / (minDist * 1.8));
-        force.add(diff.normalize().multiplyScalar(strength));
-        // Accumulate pressure for stress coloring
-        crowdPressure += overlap > 0 ? 1.0 : 0.2;
-      }
-    });
-
-    /* ── WALL REPULSION ──────────────────────────────────────────── */
+    /* ── STEP 2: WALL AVOIDANCE ──────────────────────────────────────
+     * Steer away from walls by adjusting the move direction.
+     * This is a steering correction, not a force — it rotates the
+     * direction rather than adding an opposing force to velocity.
+     * ─────────────────────────────────────────────────────────────── */
     walls.forEach((w) => {
       const closest = w.closestPoint(this.position);
       const diff = this.position.clone().sub(closest);
       const dist = diff.length();
       if (dist < 1.2 && dist > 0.01) {
-        const strength = 0.06 * Math.exp(-dist / 0.5);
-        force.add(diff.normalize().multiplyScalar(strength));
+        const pushStrength = (1.2 - dist) / 1.2;
+        moveDir.add(diff.normalize().multiplyScalar(pushStrength * 1.0));
       }
     });
 
-    /* ── INTEGRATION ─────────────────────────────────────────────── */
-    this.velocity.add(force);
-    const maxSpeed = emergency ? this.desiredSpeed * 1.2 : this.desiredSpeed * 0.35;
-    this.velocity.clampLength(0, maxSpeed);
-    this.position.add(this.velocity);
+    /* ── STEP 3: NEIGHBOUR AVOIDANCE ─────────────────────────────────
+     * Steer laterally around nearby agents.
+     * Applied as a direction adjustment, not a force into velocity.
+     * ─────────────────────────────────────────────────────────────── */
+    let crowdPressure = 0;
+    agents.forEach((other) => {
+      if (other === this || other.evacuated) return;
+      const diff = this.position.clone().sub(other.position);
+      const dist = diff.length();
+      const minDist = this.radius + other.radius + 0.1;
 
-    /* ── WALL HARD CORRECTION ────────────────────────────────────── */
+      if (dist < minDist * 2.5 && dist > 0.01) {
+        const overlap = minDist - dist;
+        const strength = overlap > 0
+          ? overlap * 1.5
+          : 0.1 * Math.exp(-dist / minDist);
+        moveDir.add(diff.normalize().multiplyScalar(strength));
+        crowdPressure += overlap > 0 ? 1.0 : 0.2;
+      }
+    });
+
+    /* ── STEP 4: NORMALIZE AND SCALE ─────────────────────────────────
+     * Normalize the combined direction and scale by desired speed.
+     * The direction might not point perfectly at the goal if walls/
+     * agents are in the way — that's correct, it means the agent is
+     * steering around obstacles. But it will NEVER point backwards
+     * because goal direction always dominates in open space.
+     * ─────────────────────────────────────────────────────────────── */
+    if (moveDir.lengthSq() > 0.0001) {
+      moveDir.normalize();
+    }
+
+    const speed = emergency ? this.desiredSpeed : this.desiredSpeed * 0.3;
+    const displacement = moveDir.clone().multiplyScalar(speed);
+
+    /* ── STEP 5: MOVE ────────────────────────────────────────────── */
+    this.position.add(displacement);
+
+    /* ── STEP 6: HARD WALL CORRECTION ───────────────────────────── */
+    // Snap position out of any wall penetration. Position only, never velocity.
     walls.forEach((w) => {
       const closest = w.closestPoint(this.position);
       const diff = this.position.clone().sub(closest);
       const dist = diff.length();
       if (dist < this.radius && dist > 0.001) {
-        const normal = diff.normalize();
-        this.position = closest.clone().add(normal.multiplyScalar(this.radius + 0.01));
-        const vDot = this.velocity.dot(normal);
-        if (vDot < 0) this.velocity.sub(normal.multiplyScalar(vDot));
+        this.position = closest.clone().add(diff.normalize().multiplyScalar(this.radius + 0.01));
       }
     });
 
-    /* ── EXIT CHECK ──────────────────────────────────────────────── */
-    if (emergency && this.position.distanceTo(this.exit) < 3) {
-      this.evacuated = true;
-      this.mesh.visible = false;
-      this.trailMeshes.forEach((m) => (m.visible = false));
-      this.position.set(9999, 9999);
-      this.velocity.set(0, 0);
-      return;
+    /* ── STEP 7: HARD OVERLAP CORRECTION ────────────────────────── */
+    // Snap position out of any agent overlap. Position only, never velocity.
+    agents.forEach((other) => {
+      if (other === this || other.evacuated) return;
+      const diff = this.position.clone().sub(other.position);
+      const dist = diff.length();
+      const minDist = this.radius + other.radius;
+      if (dist < minDist && dist > 0.001) {
+        const overlap = minDist - dist;
+        this.position.add(diff.normalize().multiplyScalar(overlap * 0.5));
+      }
+    });
+
+    /* ── STEP 8: EXIT CHECK ──────────────────────────────────────── */
+    if (emergency) {
+      const blockedIdx = flowField ? flowField.blockedExitIndex : -1;
+      const nearExit = this.exits.some((e, i) => {
+        if (i === blockedIdx) return false;
+        return this.position.distanceTo(e) < 3;
+      });
+      if (nearExit) {
+        this.evacuated = true;
+        this.mesh.visible = false;
+        this.trailMeshes.forEach((m) => (m.visible = false));
+        this.position.set(9999, 9999);
+        this.velocity.set(0, 0);
+        return;
+      }
     }
 
+    /* ── STEP 9: UPDATE VELOCITY (for trails/stress only) ────────── */
+    // Velocity is derived from actual position change — not integrated.
+    // This gives accurate trail direction without any accumulation issues.
+    this.velocity = this.position.clone().sub(prevPosition);
+
     /* ── STRESS UPDATE ───────────────────────────────────────────── */
-    // Speed-based stress: moving fast = more stressed
     const speedRatio = this.velocity.length() / this.desiredSpeed;
-    // Crowd-pressure stress: being squished = more stressed
     const pressureStress = Math.min(crowdPressure / 4, 1);
     const targetStress = emergency
-      ? Math.min((speedRatio * 0.4 + pressureStress * 0.6), 1)
+      ? Math.min(speedRatio * 0.4 + pressureStress * 0.6, 1)
       : 0;
-    // Smooth transition so color doesn't flicker
     this.stress += (targetStress - this.stress) * 0.08;
 
     const color = stressColor(this.stress);
     this.mesh.material.color.copy(color);
 
     /* ── TRAIL UPDATE ────────────────────────────────────────────── */
-    // Push current position into trail history
     this.trailPositions.unshift(this.position.clone());
-    if (this.trailPositions.length > TRAIL_LENGTH) {
-      this.trailPositions.pop();
-    }
+    if (this.trailPositions.length > TRAIL_LENGTH) this.trailPositions.pop();
 
-    // Update each trail dot's position, color, and opacity
     for (let i = 0; i < this.trailMeshes.length; i++) {
       const tp = this.trailPositions[i];
       if (tp) {
         this.trailMeshes[i].position.set(tp.x, tp.y, 0);
         this.trailMeshes[i].material.color.copy(color);
-        // Older = more faded
         this.trailMeshes[i].material.opacity =
           ((TRAIL_LENGTH - i) / TRAIL_LENGTH) * 0.3 * this.stress;
       }
