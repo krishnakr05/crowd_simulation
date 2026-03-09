@@ -14,21 +14,19 @@ export default class FlowField {
   }
 
   /* ─────────────────────────────────────────────────────────────────
-     3-phase navigation:
-       Phase 0 — walk to door waypoint (y=±13 for top/bottom rooms,
-                 x=±27 for side rooms). Fully inside open corridor.
-       Phase 1 — walk to exit.approachPt (x=±29, y=±13).
-                 This is above/below CL7/CL8 (y:-10→10) and just outside
-                 their inner wall (x=±30). All straight-line paths to it
-                 from any door waypoint stay in open corridor.
-       Phase 2 — walk to exit.pos (x=±36, y=±13). Triggers evacuation.
+     Navigation phases:
+       0 — door waypoint: walk through the physical door
+       1 — columnPt (±27, ±11): step straight up/down to clear side
+           room y-bounds (±10) before moving horizontally. Only used
+           for side room agents (|y| < 10 when leaving door).
+       2 — approachPt (±29, ±13): above side room bounds, outside x
+       3 — exit.pos: evacuation
   ───────────────────────────────────────────────────────────────────*/
   getForce(position, state) {
 
-    // Initialise on first call
     if (state.phase === undefined) {
       if (this._isInCorridor(position)) {
-        state.phase = 1;
+        state.phase = 2;
         state.assignedExit = this._nearestOpenExitIndex(position);
       } else {
         state.phase = 0;
@@ -41,24 +39,42 @@ export default class FlowField {
       const wp = this.waypoints[state.assignedWaypoint];
       if (position.distanceTo(wp) < 2.5) {
         state.assignedExit = this._nearestOpenExitIndex(position);
-        state.phase = 1;
+        const exit = this.exits[state.assignedExit];
+        // Only use columnPt if agent is still within side-room y range
+        if (exit.columnPt && Math.abs(position.y) <= 10) {
+          // Pick the columnPt that matches the exit's y direction
+          state.phase = 1;
+        } else {
+          state.phase = 2;
+        }
       } else {
         return wp.clone().sub(position).normalize();
       }
     }
 
-    // Phase 1: walk to approach point
+    // Phase 1: step straight up/down to clear side room y bounds
     if (state.phase === 1) {
+      const exit = this.exits[state.assignedExit];
+      const cp = exit.columnPt;
+      if (position.distanceTo(cp) < 2.5) {
+        state.phase = 2;
+      } else {
+        return cp.clone().sub(position).normalize();
+      }
+    }
+
+    // Phase 2: walk to approachPt
+    if (state.phase === 2) {
       const exit = this.exits[state.assignedExit];
       const ap = exit.approachPt;
       if (!ap || position.distanceTo(ap) < 2.5) {
-        state.phase = 2;
+        state.phase = 3;
       } else {
         return ap.clone().sub(position).normalize();
       }
     }
 
-    // Phase 2: walk to exit pos
+    // Phase 3: walk to exit pos
     const exit = this.exits[state.assignedExit];
     const dir = exit.pos.clone().sub(position);
     if (dir.lengthSq() < 0.0001) return new THREE.Vector2();

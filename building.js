@@ -290,10 +290,10 @@ export function createCourtyardLayout(scene) {
   // approachPt is at x=±29, y=±13 — just outside CL7/CL8 inner walls (x=±30),
   // above/below CL7/CL8 vertical bounds (y:-10→10). All paths to approachPt
   // stay in open corridor and never cross any room.
-  const exitNW = makeExit(scene, -36,  25, false); exitNW.pos = v(-36,  13); exitNW.approachPt = v(-29,  13);
-  const exitNE = makeExit(scene,  36,  25, false); exitNE.pos = v( 36,  13); exitNE.approachPt = v( 29,  13);
-  const exitSW = makeExit(scene, -36, -25, false); exitSW.pos = v(-36, -13); exitSW.approachPt = v(-29, -13);
-  const exitSE = makeExit(scene,  36, -25, false); exitSE.pos = v( 36, -13); exitSE.approachPt = v( 29, -13);
+  const exitNW = makeExit(scene, -36,  25, false); exitNW.pos = v(-36,  13); exitNW.approachPt = v(-29,  13); exitNW.columnPt = v(-27, 11);
+  const exitNE = makeExit(scene,  36,  25, false); exitNE.pos = v( 36,  13); exitNE.approachPt = v( 29,  13); exitNE.columnPt = v( 27, 11);
+  const exitSW = makeExit(scene, -36, -25, false); exitSW.pos = v(-36, -13); exitSW.approachPt = v(-29, -13); exitSW.columnPt = v(-27,-11);
+  const exitSE = makeExit(scene,  36, -25, false); exitSE.pos = v( 36, -13); exitSE.approachPt = v( 29, -13); exitSE.columnPt = v( 27,-11);
 
   /* ── ROOMS ───────────────────────────────────────────────────────── */
   const rooms = [
@@ -303,8 +303,8 @@ export function createCourtyardLayout(scene) {
     { xMin: -22, xMax:  -8, yMin: -25, yMax: -17, doorIndices: [3] }, // CL4
     { xMin:  -8, xMax:   8, yMin: -25, yMax: -17, doorIndices: [4] }, // CL5
     { xMin:   8, xMax:  22, yMin: -25, yMax: -17, doorIndices: [5] }, // CL6
-    { xMin: -40, xMax: -30, yMin: -10, yMax:  10, doorIndices: [6] }, // CL7 left
-    { xMin:  30, xMax:  40, yMin: -10, yMax:  10, doorIndices: [7] }, // CL8 right
+    { xMin: -40, xMax: -29.5, yMin: -10, yMax:  10, doorIndices: [6] }, // CL7 left
+    { xMin:  29.5, xMax:  40, yMin: -10, yMax:  10, doorIndices: [7] }, // CL8 right
     { xMin: -16, xMax:  16, yMin: -12, yMax:  12, doorIndices: [], isBlocked: true },
     { xMin: -40, xMax:  40, yMin: -25, yMax:  25, doorIndices: [], inCorridor: true },
   ];
@@ -321,14 +321,14 @@ export function createCourtyardLayout(scene) {
   ];
 
   const waypoints = [
-    new THREE.Vector2(-14,  13), // 0 CL1 — 4 units below inner wall y=17
+    new THREE.Vector2(-14,  13), // 0 CL1
     new THREE.Vector2(  0,  13), // 1 CL2
     new THREE.Vector2( 14,  13), // 2 CL3
     new THREE.Vector2(-14, -13), // 3 CL4
     new THREE.Vector2(  0, -13), // 4 CL5
     new THREE.Vector2( 14, -13), // 5 CL6
-    new THREE.Vector2(-27,   0), // 6 CL7 — 3 units past inner wall x=-30
-    new THREE.Vector2( 27,   0), // 7 CL8
+    new THREE.Vector2(-25,   0), // 6 CL7 — 5 units past inner wall x=-30
+    new THREE.Vector2( 25,   0), // 7 CL8 — 5 units past inner wall x=30
   ];
 
   return {
