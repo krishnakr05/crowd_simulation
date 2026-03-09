@@ -144,8 +144,8 @@ function resetSimulation(layoutFn) {
     camera.left = -60; camera.right = 60;
     camera.top = 38;   camera.bottom = -38;
   } else if (currentLayout.name === 'office') {
-    camera.left = -50; camera.right = 50;
-    camera.top = 32;   camera.bottom = -32;
+    camera.left = -55; camera.right = 55;
+    camera.top = 35;   camera.bottom = -35;
   } else {
     camera.left = -50; camera.right = 50;
     camera.top = 30;   camera.bottom = -30;
