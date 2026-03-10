@@ -1,6 +1,5 @@
 import * as THREE from "https://cdn.skypack.dev/three@0.152.2";
 
-// Color ramp: calm (blue) → moderate (yellow) → stressed (red)
 function stressColor(t) {
   t = Math.max(0, Math.min(1, t));
   if (t < 0.5) {
@@ -18,21 +17,22 @@ export default class Agent {
   constructor(position, doors, exits) {
     this.position = position.clone();
     this.doors = doors;
-    // exits can be a single Vector2 (legacy) or array of {pos} objects
-    this.exits = Array.isArray(exits)
-      ? exits.map(e => e.pos ? e.pos : e)
-      : [exits];
+
+    // Keep FULL exit objects (with .pos, .gapXMin, etc.) — needed for gap check
+    this.exitObjects = Array.isArray(exits) ? exits : [exits];
+    // Also keep plain positions for legacy distance checks
+    this.exits = this.exitObjects.map(e => e.pos ? e.pos : e);
 
     this.radius = 0.5;
     this.desiredSpeed = 0.07 + Math.random() * 0.03;
     this.navState = {};
     this.evacuated = false;
+    this.exiting = false;
+    this.exitDir = null;
     this.stress = 0;
+    this.stuckFrames = 0;
 
-    // velocity is now only used for trail rendering and stress calculation
-    // it is recomputed fresh every frame — never accumulated
     this.velocity = new THREE.Vector2();
-
     this.trailPositions = [];
     this.trailMeshes = [];
 
@@ -64,34 +64,93 @@ export default class Agent {
     this.trailMeshes.forEach((m) => scene.add(m));
   }
 
-  update(agents, walls, flowField, emergency) {
+  resetNavState() {
+    this.navState = {};
+    this.stuckFrames = 0;
+  }
+
+  // Returns true only if agent is physically inside the exit gap opening
+  _inExitGap(exitObj) {
+    if (exitObj.gapXMin === undefined) return true; // no gap defined, allow
+    return (
+      this.position.x >= exitObj.gapXMin && this.position.x <= exitObj.gapXMax &&
+      this.position.y >= exitObj.gapYMin && this.position.y <= exitObj.gapYMax
+    );
+  }
+
+  update(agents, walls, flowField, emergency, speedMultiplier = 1.0) {
     if (this.evacuated) return;
 
     const prevPosition = this.position.clone();
 
-    /* ── STEP 1: COMPUTE DESIRED MOVE DIRECTION ─────────────────────
-     * Start with a clean desired direction each frame.
-     * No velocity history. No accumulation. Purely kinematic.
-     * ─────────────────────────────────────────────────────────────── */
+    if (emergency) {
+      const blockedIdx = flowField ? flowField.blockedExitIndex : -1;
+
+      // Already exiting — walk freely until off screen
+      if (this.exiting) {
+        const speed = this.desiredSpeed * speedMultiplier;
+        this.position.add(this.exitDir.clone().multiplyScalar(speed));
+        this.mesh.position.set(this.position.x, this.position.y, 0);
+        this.trailPositions.unshift(this.position.clone());
+        if (this.trailPositions.length > TRAIL_LENGTH) this.trailPositions.pop();
+        for (let i = 0; i < this.trailMeshes.length; i++) {
+          const tp = this.trailPositions[i];
+          if (tp) {
+            this.trailMeshes[i].position.set(tp.x, tp.y, 0);
+            this.trailMeshes[i].material.opacity =
+              ((TRAIL_LENGTH - i) / TRAIL_LENGTH) * 0.15;
+          }
+        }
+        const offScreen =
+          this.position.x < -85 || this.position.x > 85 ||
+          this.position.y < -60 || this.position.y > 60;
+        if (offScreen) {
+          this.evacuated = true;
+          this.mesh.visible = false;
+          this.trailMeshes.forEach((m) => (m.visible = false));
+          this.position.set(9999, 9999);
+          this.velocity.set(0, 0);
+        }
+        return;
+      }
+
+      // Exit trigger: agent must be in phase 2 AND physically inside the gap
+      // opening in the outer wall. The gap is the only place in the wall that
+      // has no wall segment — walls physically prevent reaching it from inside rooms.
+      if (!this.exiting && this.navState.phase === 2) {
+        const assignedIdx = this.navState.assignedExit;
+        if (assignedIdx !== undefined && assignedIdx !== blockedIdx) {
+          const exitObj = this.exitObjects[assignedIdx];
+          const exitPos = this.exits[assignedIdx];
+          if (exitPos && this.position.distanceTo(exitPos) < 6 && this._inExitGap(exitObj)) {
+            this.exiting = true;
+            this.exitDir = this.velocity.clone().normalize();
+            if (this.exitDir.lengthSq() < 0.001) {
+              this.exitDir = exitPos.clone().sub(this.position).normalize();
+            }
+            if (this.exitDir.lengthSq() < 0.001) this.exitDir.set(0, 1);
+            const lateral = new THREE.Vector2(-this.exitDir.y, this.exitDir.x);
+            const spread = (this.desiredSpeed - 0.07) / 0.03;
+            this.exitDir.add(lateral.multiplyScalar((spread - 0.5) * 0.8)).normalize();
+            return;
+          }
+        }
+      }
+    }
+
+    // Normal navigation
     let moveDir = new THREE.Vector2();
 
     if (!emergency) {
-      // Idle: tiny random drift
       moveDir.add(new THREE.Vector2(
         (Math.random() - 0.5) * 0.3,
         (Math.random() - 0.5) * 0.3
       ));
     } else if (flowField) {
-      // Emergency: move toward goal
       const goalDir = flowField.getForce(this.position, this.navState);
       moveDir.add(goalDir);
     }
 
-    /* ── STEP 2: WALL AVOIDANCE ──────────────────────────────────────
-     * Steer away from walls by adjusting the move direction.
-     * This is a steering correction, not a force — it rotates the
-     * direction rather than adding an opposing force to velocity.
-     * ─────────────────────────────────────────────────────────────── */
     walls.forEach((w) => {
       const closest = w.closestPoint(this.position);
       const diff = this.position.clone().sub(closest);
@@ -102,17 +161,12 @@ export default class Agent {
       }
     });
 
-    /* ── STEP 3: NEIGHBOUR AVOIDANCE ─────────────────────────────────
-     * Steer laterally around nearby agents.
-     * Applied as a direction adjustment, not a force into velocity.
-     * ─────────────────────────────────────────────────────────────── */
     let crowdPressure = 0;
     agents.forEach((other) => {
-      if (other === this || other.evacuated) return;
+      if (other === this || other.evacuated || other.exiting) return;
       const diff = this.position.clone().sub(other.position);
       const dist = diff.length();
       const minDist = this.radius + other.radius + 0.1;
-
       if (dist < minDist * 2.5 && dist > 0.01) {
         const overlap = minDist - dist;
         const strength = overlap > 0
@@ -123,25 +177,12 @@ export default class Agent {
       }
     });
 
-    /* ── STEP 4: NORMALIZE AND SCALE ─────────────────────────────────
-     * Normalize the combined direction and scale by desired speed.
-     * The direction might not point perfectly at the goal if walls/
-     * agents are in the way — that's correct, it means the agent is
-     * steering around obstacles. But it will NEVER point backwards
-     * because goal direction always dominates in open space.
-     * ─────────────────────────────────────────────────────────────── */
-    if (moveDir.lengthSq() > 0.0001) {
-      moveDir.normalize();
-    }
+    if (moveDir.lengthSq() > 0.0001) moveDir.normalize();
 
-    const speed = emergency ? this.desiredSpeed : this.desiredSpeed * 0.3;
-    const displacement = moveDir.clone().multiplyScalar(speed);
+    const speed = (emergency ? this.desiredSpeed : this.desiredSpeed * 0.3) * speedMultiplier;
+    this.position.add(moveDir.clone().multiplyScalar(speed));
 
-    /* ── STEP 5: MOVE ────────────────────────────────────────────── */
-    this.position.add(displacement);
-
-    /* ── STEP 6: HARD WALL CORRECTION ───────────────────────────── */
-    // Snap position out of any wall penetration. Position only, never velocity.
+    // Hard wall correction
     walls.forEach((w) => {
       const closest = w.closestPoint(this.position);
       const diff = this.position.clone().sub(closest);
@@ -151,10 +192,9 @@ export default class Agent {
       }
     });
 
-    /* ── STEP 7: HARD OVERLAP CORRECTION ────────────────────────── */
-    // Snap position out of any agent overlap. Position only, never velocity.
+    // Agent overlap correction
     agents.forEach((other) => {
-      if (other === this || other.evacuated) return;
+      if (other === this || other.evacuated || other.exiting) return;
       const diff = this.position.clone().sub(other.position);
       const dist = diff.length();
       const minDist = this.radius + other.radius;
@@ -164,29 +204,60 @@ export default class Agent {
       }
     });
 
-    /* ── STEP 8: EXIT CHECK ──────────────────────────────────────── */
+    // Hard wall correction again after overlap (overlap can push through walls)
+    walls.forEach((w) => {
+      const closest = w.closestPoint(this.position);
+      const diff = this.position.clone().sub(closest);
+      const dist = diff.length();
+      if (dist < this.radius && dist > 0.001) {
+        this.position = closest.clone().add(diff.normalize().multiplyScalar(this.radius + 0.01));
+      }
+    });
+
+    this.velocity = this.position.clone().sub(prevPosition);
+
+    /* ── STUCK DETECTION ─────────────────────────────────────────── */
     if (emergency) {
-      const blockedIdx = flowField ? flowField.blockedExitIndex : -1;
-      const nearExit = this.exits.some((e, i) => {
-        if (i === blockedIdx) return false;
-        return this.position.distanceTo(e) < 3;
-      });
-      if (nearExit) {
-        this.evacuated = true;
-        this.mesh.visible = false;
-        this.trailMeshes.forEach((m) => (m.visible = false));
-        this.position.set(9999, 9999);
-        this.velocity.set(0, 0);
-        return;
+      if (this.velocity.length() < this.desiredSpeed * 0.15) {
+        this.stuckFrames++;
+
+        // 20 frames: nudge
+        if (this.stuckFrames % 20 === 0) {
+          const angle = Math.random() * Math.PI * 2;
+          this.position.x += Math.cos(angle) * 0.4;
+          this.position.y += Math.sin(angle) * 0.4;
+        }
+
+        // 40 frames: jump to phase 1 (corridor nav)
+        if (this.stuckFrames === 40 && flowField) {
+          this.navState = {
+            phase: 1,
+            chainStep: 0,
+            assignedExit: flowField.nearestOpenExitIndex(this.position),
+          };
+        }
+
+        // 80 frames: teleport to nearest corridor waypoint — guaranteed inside corridor
+        // From corridor, agent walks normally to exit through the door gap
+        if (this.stuckFrames === 80 && flowField) {
+          const corridorWp = flowField._nearestCorridorWaypoint(this.position);
+          if (corridorWp) {
+            this.position.set(corridorWp.x, corridorWp.y);
+            this.navState = {
+              phase: 1,
+              chainStep: 0,
+              assignedExit: flowField.nearestOpenExitIndex(this.position),
+            };
+            this.stuckFrames = 0;
+          }
+        }
+
+      } else {
+        this.stuckFrames = 0;
       }
     }
 
-    /* ── STEP 9: UPDATE VELOCITY (for trails/stress only) ────────── */
-    // Velocity is derived from actual position change — not integrated.
-    // This gives accurate trail direction without any accumulation issues.
-    this.velocity = this.position.clone().sub(prevPosition);
-
-    /* ── STRESS UPDATE ───────────────────────────────────────────── */
+    /* ── VISUALS ─────────────────────────────────────────────────── */
     const speedRatio = this.velocity.length() / this.desiredSpeed;
     const pressureStress = Math.min(crowdPressure / 4, 1);
     const targetStress = emergency
@@ -197,7 +268,6 @@ export default class Agent {
     const color = stressColor(this.stress);
     this.mesh.material.color.copy(color);
 
-    /* ── TRAIL UPDATE ────────────────────────────────────────────── */
     this.trailPositions.unshift(this.position.clone());
     if (this.trailPositions.length > TRAIL_LENGTH) this.trailPositions.pop();
 
@@ -211,7 +281,6 @@ export default class Agent {
       }
     }
 
-    /* ── RENDER ──────────────────────────────────────────────────── */
     this.mesh.position.set(this.position.x, this.position.y, 0);
   }
 }

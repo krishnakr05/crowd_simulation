@@ -1,8 +1,7 @@
 import { triggerEmergency } from "./main.js";
 
-const HOLD_FRAMES = 30; // frames gesture must be held (~1 second at 30fps)
+const HOLD_FRAMES = 30;
 
-// Fingertip and knuckle landmark indices
 const FINGERTIPS = [8, 12, 16, 20];
 const KNUCKLES   = [6, 10, 14, 18];
 
@@ -10,8 +9,6 @@ let holdCount = 0;
 let landmarker = null;
 let lastVideoTime = -1;
 
-/* ── STATUS INDICATOR ────────────────────────────────────────────── */
-// Small on-screen indicator showing gesture detection state
 const gestureStatus = document.createElement("div");
 gestureStatus.style.cssText = `
   position: fixed; bottom: 72px; right: 20px;
@@ -22,7 +19,6 @@ gestureStatus.style.cssText = `
 gestureStatus.textContent = "GESTURE: INITIALIZING...";
 document.body.appendChild(gestureStatus);
 
-// Progress bar that fills as gesture is held
 const gestureBar = document.createElement("div");
 gestureBar.style.cssText = `
   position: fixed; bottom: 64px; right: 20px;
@@ -43,10 +39,8 @@ function setStatus(text, color = "#00ffcc") {
   gestureStatus.style.color = color;
 }
 
-/* ── MEDIAPIPE SETUP ─────────────────────────────────────────────── */
 async function initGesture() {
   try {
-    // Load MediaPipe vision tasks from CDN
     const vision = await import(
       "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/+esm"
     );
@@ -64,19 +58,17 @@ async function initGesture() {
         delegate: "GPU",
       },
       runningMode: "VIDEO",
-      numHands: 1, // only need one hand
+      numHands: 1,
     });
 
-    // Request webcam
     const stream = await navigator.mediaDevices.getUserMedia({
-  video: { width: 320, height: 240 } 
-});
+      video: { width: 320, height: 240 }
+    });
 
     const video = document.createElement("video");
     video.srcObject = stream;
     video.autoplay = true;
     video.playsInline = true;
-    // Hidden — we only need the stream for detection, not display
     video.style.cssText = "position:fixed; opacity:0; pointer-events:none; width:1px; height:1px;";
     document.body.appendChild(video);
 
@@ -86,37 +78,32 @@ async function initGesture() {
     detectLoop(video);
 
   } catch (err) {
-    // Graceful fallback — gesture just won't work, click still works
     console.warn("Gesture detection unavailable:", err.message);
     setStatus("UNAVAILABLE", "#ff4444");
     setTimeout(() => { gestureStatus.style.display = "none"; gestureBar.style.display = "none"; }, 3000);
   }
 }
 
-/* ── DETECTION LOOP ──────────────────────────────────────────────── */
-let frameCount=0;
+let frameCount = 0;
 function detectLoop(video) {
   requestAnimationFrame(() => detectLoop(video));
   frameCount++;
   if (frameCount % 3 !== 0) return;
 
-  // Only process new frames
   if (video.currentTime === lastVideoTime) return;
   lastVideoTime = video.currentTime;
 
   const results = landmarker.detectForVideo(video, performance.now());
 
   if (!results.landmarks || results.landmarks.length === 0) {
-    // No hand detected — reset hold counter
     holdCount = 0;
     gestureBarFill.style.width = "0%";
     setStatus("READY — RAISE PALM");
     return;
   }
 
-  const landmarks = results.landmarks[0]; // first hand
+  const landmarks = results.landmarks[0];
 
-  // Check if all 4 fingers are raised
   const palmRaised = FINGERTIPS.every(
     (tipIdx, i) => landmarks[tipIdx].y < landmarks[KNUCKLES[i]].y
   );
@@ -128,23 +115,19 @@ function detectLoop(video) {
     setStatus(`HOLD... ${Math.round(progress * 100)}%`, "#ffcc00");
 
     if (holdCount >= HOLD_FRAMES) {
-      // Gesture confirmed — trigger emergency
       triggerEmergency();
       setStatus("TRIGGERED ✓", "#00ff88");
       gestureBarFill.style.width = "100%";
-      // Hide gesture UI after triggering
       setTimeout(() => {
         gestureStatus.style.display = "none";
         gestureBar.style.display = "none";
       }, 1500);
     }
   } else {
-    // Hand visible but palm not raised — decay hold count
     holdCount = Math.max(0, holdCount - 2);
     gestureBarFill.style.width = (holdCount / HOLD_FRAMES * 100) + "%";
     setStatus("HAND DETECTED", "#00aaff");
   }
 }
 
-/* ── INIT ────────────────────────────────────────────────────────── */
 initGesture();

@@ -10,14 +10,27 @@ scene.background = new THREE.Color(0x060e18);
 const camera = new THREE.OrthographicCamera(-50, 50, 30, -30, 1, 100);
 camera.position.z = 50;
 
+const PANEL_WIDTH = 210;
+
 const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(window.devicePixelRatio);
 document.body.appendChild(renderer.domElement);
 
-window.addEventListener("resize", () => {
-  renderer.setSize(window.innerWidth, window.innerHeight);
-});
+function updateRendererSize() {
+  const w = window.innerWidth - PANEL_WIDTH;
+  const h = window.innerHeight;
+  renderer.setSize(w, h);
+  // Recompute horizontal extent to match new aspect, keep vertical fixed
+  const vHalf = camera.top;
+  if (vHalf) {
+    const aspect = w / h;
+    camera.left   = -vHalf * aspect;
+    camera.right  =  vHalf * aspect;
+    camera.updateProjectionMatrix();
+  }
+}
+
+window.addEventListener("resize", updateRendererSize);
 
 /* ── EMERGENCY FLASH OVERLAY ─────────────────────────────────────── */
 const flashMat = new THREE.MeshBasicMaterial({
@@ -46,7 +59,7 @@ function createPulseRing(x, y) {
 /* ── HUD ─────────────────────────────────────────────────────────── */
 const hud = document.createElement("div");
 hud.style.cssText = `
-  position:fixed; top:0; left:0; width:100%; pointer-events:none;
+  position:fixed; top:0; left:0; pointer-events:none;
   font-family:'Courier New',monospace; color:#00ffcc;
   padding:18px 24px; box-sizing:border-box;
 `;
@@ -92,12 +105,14 @@ let pulseTimer = 0;
 let time = 0;
 let totalAgents = 150;
 
+// Interactivity controls (set by ui.js)
+export let simSpeedMultiplier = 1.0;
+export let targetAgentCount = 150;
+
+export function setSpeedMultiplier(v) { simSpeedMultiplier = v; }
+export function setTargetAgentCount(v) { targetAgentCount = v; }
+
 /* ── WAYPOINT GENERATION ─────────────────────────────────────────── */
-// Waypoints are defined explicitly in each layout alongside doors.
-// Each waypoint is a safe point inside the corridor just past the door,
-// guaranteed not to be inside any wall or corner exit zone.
-// If a layout provides waypoints, use them directly.
-// Otherwise fall back to computing from room geometry.
 function generateWaypoints(doors, rooms, explicitWaypoints) {
   if (explicitWaypoints) return explicitWaypoints;
   return doors.map((door, doorIdx) => {
@@ -113,15 +128,13 @@ function generateWaypoints(doors, rooms, explicitWaypoints) {
 }
 
 /* ── BUILD + RESET ───────────────────────────────────────────────── */
-function resetSimulation(layoutFn) {
-  // Remove old agent meshes
+export function resetSimulation(layoutFn) {
   agents.forEach((a) => {
     scene.remove(a.mesh);
     a.trailMeshes.forEach((m) => scene.remove(m));
   });
   agents = [];
 
-  // Remove old building meshes and walls
   if (currentLayout) {
     currentLayout.walls.forEach((w) => scene.remove(w.mesh));
     currentLayout.meshes.forEach((m) => scene.remove(m));
@@ -131,31 +144,30 @@ function resetSimulation(layoutFn) {
     });
   }
 
-  // Remove pulse rings
   pulseRings.forEach((r) => scene.remove(r));
   pulseRings.length = 0;
 
-  // Build new layout
   currentLayout = layoutFn(scene);
   walls = currentLayout.walls;
 
-  // Adjust camera for layout
+  // Set camera vertical extent per layout, then derive horizontal from aspect
+  let vHalf; // half-height in world units
   if (currentLayout.name === 'courtyard') {
-    camera.left = -60; camera.right = 60;
-    camera.top = 38;   camera.bottom = -38;
+    vHalf = 40;
   } else if (currentLayout.name === 'office') {
-    camera.left = -55; camera.right = 55;
-    camera.top = 35;   camera.bottom = -35;
+    vHalf = 38;
   } else {
-    camera.left = -50; camera.right = 50;
-    camera.top = 30;   camera.bottom = -30;
+    vHalf = 34; // symmetric
   }
+  const aspect = (window.innerWidth - PANEL_WIDTH) / window.innerHeight;
+  camera.left   = -vHalf * aspect;
+  camera.right  =  vHalf * aspect;
+  camera.top    =  vHalf;
+  camera.bottom = -vHalf;
   camera.updateProjectionMatrix();
 
-  // Generate waypoints
   const waypoints = generateWaypoints(currentLayout.doors, currentLayout.rooms, currentLayout.waypoints);
 
-  // Build FlowField
   flowField = new FlowField(
     currentLayout.exits,
     currentLayout.doors,
@@ -163,18 +175,24 @@ function resetSimulation(layoutFn) {
     waypoints
   );
 
-  // Spawn agents
-  totalAgents = 150;
+  totalAgents = targetAgentCount;
   document.getElementById("agentTotal").textContent = totalAgents;
+
+  // Outer wall coordinates per layout — agents can only cross these at door gaps
+  const buildingBounds = {
+    symmetric: { xMin: -30, xMax: 30, yMin: -20, yMax: 20 },
+    courtyard: { xMin: -40, xMax: 40, yMin: -25, yMax: 25 },
+    office:    { xMin: -40, xMax: 40, yMin: -25, yMax: 25 },
+  }[currentLayout.name] || { xMin: -30, xMax: 30, yMin: -20, yMax: 20 };
 
   for (let i = 0; i < totalAgents; i++) {
     const pos = randomSpawnPosition(currentLayout.spawnZones);
     const agent = new Agent(pos, currentLayout.doors, currentLayout.exits);
+    agent.buildingBounds = buildingBounds;
     agent.addToScene(scene);
     agents.push(agent);
   }
 
-  // Reset state
   emergency = false;
   flashOpacity = 0;
   pulseTimer = 0;
@@ -190,7 +208,6 @@ function resetSimulation(layoutFn) {
   document.getElementById("agentCount").textContent = totalAgents;
   document.getElementById("evacCount").textContent = "0";
 
-  // Reset exit colors to green
   currentLayout.exits.forEach((e) => {
     e.bar.material.color.setHex(0x00ff88);
     e.glow.material.color.setHex(0x00ff44);
@@ -218,27 +235,64 @@ export function triggerEmergency() {
   document.getElementById("status").style.color = "#ff4400";
   document.getElementById("evacuated").style.opacity = "1";
 
-  // Randomly block one exit
-  const blockedIdx = Math.floor(Math.random() * currentLayout.exits.length);
-  flowField.setBlockedExit(blockedIdx);
+  // Start with no blocked exit — UI controls which exit is blocked
+  flowField.setBlockedExit(-1);
 
-  // Show blocked exit in red, keep others green
-  currentLayout.exits.forEach((e, i) => {
-    if (i === blockedIdx) {
-      e.bar.material.color.setHex(0xff2200);
-      e.glow.material.color.setHex(0xff2200);
-    }
-  });
+  document.getElementById("blockedNotice").style.opacity = "0";
 
-  document.getElementById("blockedNotice").style.opacity = "1";
+  // Pulse rings from all exits
+  currentLayout.exits.forEach((e) => createPulseRing(e.pos.x, e.pos.y));
 
-  // Pulse rings from all open exits
-  currentLayout.exits.forEach((e, i) => {
-    if (i !== blockedIdx) createPulseRing(e.pos.x, e.pos.y);
-  });
+  // Notify ui.js that emergency started so it can refresh exit buttons
+  window.dispatchEvent(new CustomEvent('emergencyStarted'));
 }
 
-window.addEventListener("click", () => triggerEmergency());
+/* ── BLOCK / UNBLOCK EXIT (called from ui.js) ────────────────────── */
+export function setBlockedExit(index) {
+  if (!flowField || !currentLayout) return;
+  const prev = flowField.blockedExitIndex;
+  flowField.setBlockedExit(index);
+
+  // Reset ALL agent nav states so they recompute routes with new exit availability
+  agents.forEach(a => {
+    if (!a.evacuated) a.resetNavState();
+  });
+
+  // Update exit visual colors
+  currentLayout.exits.forEach((e, i) => {
+    const isBlocked = (i === index);
+    e.bar.material.color.setHex(isBlocked ? 0xff2200 : 0x00ff88);
+    e.glow.material.color.setHex(isBlocked ? 0xff2200 : 0x00ff44);
+  });
+
+  // Show/hide blocked notice
+  if (index >= 0) {
+    document.getElementById("blockedNotice").style.opacity = "1";
+    // Pulse from open exits
+    currentLayout.exits.forEach((e, i) => {
+      if (i !== index) createPulseRing(e.pos.x, e.pos.y);
+    });
+  } else {
+    document.getElementById("blockedNotice").style.opacity = "0";
+    // Pulse from all exits (all open)
+    currentLayout.exits.forEach((e) => createPulseRing(e.pos.x, e.pos.y));
+  }
+}
+
+/* ── GET CURRENT LAYOUT EXITS (for ui.js) ───────────────────────── */
+export function getExitCount() {
+  return currentLayout ? currentLayout.exits.length : 0;
+}
+export function getBlockedExitIndex() {
+  return flowField ? flowField.blockedExitIndex : -1;
+}
+export function isEmergency() { return emergency; }
+
+window.addEventListener("click", (e) => {
+  // Don't trigger if clicking on UI panels
+  if (e.target.closest && e.target.closest('[data-no-emergency]')) return;
+  triggerEmergency();
+});
 
 /* ── LAYOUT SWITCHER API (called from ui.js) ─────────────────────── */
 export function switchLayout(name) {
@@ -256,12 +310,13 @@ function animate() {
   time++;
 
   if (agents.length && flowField) {
-    agents.forEach((a) => a.update(agents, walls, flowField, emergency));
+    agents.forEach((a) => a.update(agents, walls, flowField, emergency, simSpeedMultiplier));
   }
 
   const alive = agents.filter((a) => !a.evacuated).length;
+  const fullyEvacuated = agents.filter((a) => a.evacuated).length;
   document.getElementById("agentCount").textContent = alive;
-  document.getElementById("evacCount").textContent = totalAgents - alive;
+  document.getElementById("evacCount").textContent = fullyEvacuated;
 
   if (flashOpacity > 0) {
     flashOpacity -= 0.012;
@@ -296,4 +351,5 @@ function animate() {
 
 /* ── INIT ────────────────────────────────────────────────────────── */
 resetSimulation(createSymmetricLayout);
+updateRendererSize();
 animate();
