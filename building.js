@@ -47,6 +47,7 @@ function makeDoorMarker(scene, x, y, vertical = true) {
   );
   mesh.position.set(x, y, -0.05);
   scene.add(mesh);
+  return mesh
 }
 
 function makeExit(scene, x, y, rotated = false) {
@@ -113,7 +114,7 @@ export function createSymmetricLayout(scene) {
   doors.push(v( 5,  10));
   doors.push(v( 5,   0));
   doors.push(v( 5, -14));
-  doors.forEach((d) => makeDoorMarker(scene, d.x, d.y, true));
+  doors.forEach((d) => meshes.push(makeDoorMarker(scene, d.x, d.y, true)));
 
   const exitBottom = makeExit(scene, 0, -20);
   exitBottom.pos = v(0, -20);
@@ -227,7 +228,7 @@ export function createCourtyardLayout(scene) {
   doors.push(v( 14, -17));
   doors.push(v(-30,   0));
   doors.push(v( 30,   0));
-  doors.forEach((d, i) => makeDoorMarker(scene, d.x, d.y, i >= 6));
+  doors.forEach((d, i) => meshes.push(makeDoorMarker(scene, d.x, d.y, i >= 6)));
 
   const exitNW = makeExit(scene, -36,  25, false); exitNW.pos = v(-36,  25); exitNW.approachPt = v(-29,  13); exitNW.columnPt = v(-27, 11); exitNW.gapXMin=-40; exitNW.gapXMax=-32; exitNW.gapYMin=23; exitNW.gapYMax=27;
   const exitNE = makeExit(scene,  36,  25, false); exitNE.pos = v( 36,  25); exitNE.approachPt = v( 29,  13); exitNE.columnPt = v( 27, 11); exitNE.gapXMin= 32; exitNE.gapXMax= 40; exitNE.gapYMin=23; exitNE.gapYMax=27;
@@ -358,7 +359,7 @@ export function createOfficeLayout(scene) {
   doors.push(v( 25,  19));
   doors.push(v( 25,   7));
   doors.push(v( 25,  -3));
-  doors.forEach((d) => makeDoorMarker(scene, d.x, d.y, false));
+  doors.forEach((d) => meshes.push(makeDoorMarker(scene, d.x, d.y, false)));
 
   const exitA = makeExit(scene, -21,  25, false);
   exitA.pos = v(-21, 25);
